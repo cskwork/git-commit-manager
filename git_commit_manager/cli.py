@@ -113,9 +113,8 @@ def _check_and_suggest_ollama_model(model: Optional[str] = None) -> str:
         console.print(Panel(
             "[yellow]Ollama에 설치된 모델이 없습니다.[/yellow]\n\n"
             "다음 명령어로 모델을 설치하세요:\n"
-            "[cyan]ollama pull deepseek-r1:1.5b[/cyan] (추천)\n"
+            "[cyan]ollama pull gemma3:1b[/cyan] (추천)\n"
             "[cyan]ollama pull qwen2.5-coder:1.5b[/cyan]\n"
-            "[cyan]ollama pull gemma3:1b[/cyan]\n\n"
             "또는 다른 프로바이더를 사용하세요:\n"
             "[dim]-p openrouter 또는 -p gemini[/dim]",
             title="[bold red]모델 없음[/bold red]",
@@ -332,7 +331,7 @@ def models():
             console.print(f"  - {m['name']} ({size_gb:.1f}GB)")
     else:
         console.print("  [dim]설치된 모델 없음[/dim]")
-        console.print("  [dim]설치: ollama pull deepseek-r1:1.5b[/dim]")
+        console.print("  [dim]설치: ollama pull gemma3:1b[/dim]")
     
     # OpenRouter 모델
     console.print("\n[yellow]OpenRouter (API):[/yellow]")
@@ -360,14 +359,14 @@ def config():
     console.print(Panel(
         "[bold]Git Commit Manager 설정 가이드[/bold]\n\n"
         "1. [yellow]빠른 시작:[/yellow]\n"
-        "   gcm watch  # deepseek-r1:1.5b 모델로 자동 시작\n\n"
+        "   gcm watch  # gemma3:1b 모델로 자동 시작\n\n"
         "2. [yellow]Ollama 설정 (추천):[/yellow]\n"
         "   - 설치: https://ollama.ai\n"
-        "   - 모델 설치: ollama pull deepseek-r1:1.5b\n"
+        "   - 모델 설치: ollama pull gemma3:1b\n"
         "   - 다른 추천: qwen2.5-coder:1.5b, gemma3:1b\n\n"
         "3. [yellow]환경 설정 (.env):[/yellow]\n"
         "   DEFAULT_PROVIDER=ollama\n"
-        "   DEFAULT_MODEL=deepseek-r1:1.5b\n"
+        "   DEFAULT_MODEL=gemma3:1b\n"
         "   COMMIT_MESSAGE_LANGUAGE=korean\n"
         "   AUTO_CODE_REVIEW=true\n"
         "   ENABLE_CACHE=true\n\n"

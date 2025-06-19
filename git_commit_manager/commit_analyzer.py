@@ -75,7 +75,7 @@ class CacheManager:
 class PromptTemplates:
     """프롬프트 템플릿 관리 클래스"""
     
-    # DeepSeek-R1에 최적화된 커밋 메시지 생성용 시스템 프롬프트
+    # 최적화된 커밋 메시지 생성용 시스템 프롬프트
     DEFAULT_COMMIT_SYSTEM_PROMPTS = {
         "korean": """당신은 지시된 형식에 따라 Git 커밋 메시지를 생성하는 자동화된 도구입니다. 당신의 유일한 임무는 제공된 변경사항 요약을 바탕으로 Conventional Commit 형식의 커밋 메시지 텍스트를 생성하는 것입니다.
 
@@ -98,7 +98,7 @@ feat(api): add user authentication endpoint
 - Includes `/auth/login` and `/auth/register` endpoints."""
     }
     
-    # DeepSeek-R1에 최적화된 커밋 메시지 생성용 사용자 프롬프트
+    # 최적화된 커밋 메시지 생성용 사용자 프롬프트
     DEFAULT_COMMIT_USER_PROMPTS = {
         "korean": """### 변경사항 요약 ###
 {changes_summary}
@@ -113,7 +113,7 @@ feat(api): add user authentication endpoint
 Generate a Conventional Commit message for the changes above."""
     }
     
-    # DeepSeek-R1에 최적화된 코드 리뷰용 시스템 프롬프트
+    # 최적화된 코드 리뷰용 시스템 프롬프트
     DEFAULT_REVIEW_SYSTEM_PROMPTS = {
         "korean": """당신은 코드 리뷰를 수행하는 자동화된 도구입니다. 당신의 유일한 임무는 제공된 코드 변경사항에 대해 지정된 형식으로 리뷰를 생성하는 것입니다. 다른 텍스트를 포함하지 마세요.
 
@@ -144,7 +144,7 @@ Generate a Conventional Commit message for the changes above."""
 Omit sections if they are not applicable."""
     }
     
-    # DeepSeek-R1에 최적화된 코드 리뷰용 사용자 프롬프트
+    # 최적화된 코드 리뷰용 사용자 프롬프트
     DEFAULT_REVIEW_USER_PROMPTS = {
         "korean": """### 코드 변경사항 ###
 **파일:** `{file_path}`
@@ -178,7 +178,7 @@ Generate a code review for the change above."""
         }
     
     @classmethod
-    def get_commit_user_prompts(cls) -> Dict[str, str]:
+    def get_commit_user_prompts(cls) -> Dict[str, str]:te
         """환경변수 또는 기본값에서 커밋 사용자 프롬프트 가져오기"""
         return {
             "korean": Config.CUSTOM_COMMIT_USER_PROMPT_KOREAN or cls.DEFAULT_COMMIT_USER_PROMPTS["korean"],
@@ -211,7 +211,7 @@ class CommitAnalyzer:
     """AI를 사용한 커밋 분석 클래스"""
     
     # 상수 정의
-    MAX_DIFF_LINES = 15  # DeepSeek-R1에 맞게 증가
+    MAX_DIFF_LINES = 15  
     MAX_FILES_PER_CHUNK = 5  # 한 청크당 최대 파일 수
     
     def __init__(self, llm_provider: LLMProvider, git_analyzer: GitAnalyzer):

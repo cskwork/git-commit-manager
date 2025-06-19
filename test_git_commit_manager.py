@@ -40,12 +40,12 @@ def test_ollama_connection():
             for m in models:
                 console.print(f"  - {m['name']}")
             
-            # deepseek-r1:1.5b 확인
-            if any('deepseek-r1:1.5b' in m['name'] for m in models):
-                console.print("[green]✓ deepseek-r1:1.5b 모델 확인됨[/green]")
+            # gemma3:1b 확인
+            if any('gemma3:1b' in m['name'] for m in models):
+                console.print("[green]✓ gemma3:1b 모델 확인됨[/green]")
             else:
-                console.print("[yellow]! deepseek-r1:1.5b 모델이 없습니다. 설치하세요:[/yellow]")
-                console.print("[cyan]  ollama pull deepseek-r1:1.5b[/cyan]")
+                console.print("[yellow]! gemma3:1b 모델이 없습니다. 설치하세요:[/yellow]")
+                console.print("[cyan]  ollama pull gemma3:1b[/cyan]")
         else:
             console.print("[red]✗ Ollama에 모델이 없습니다[/red]")
             return False
@@ -61,8 +61,8 @@ def test_llm_generation():
     print_section("LLM 생성 테스트")
     
     try:
-        # deepseek-r1:1.5b로 테스트
-        llm = get_provider("ollama", "deepseek-r1:1.5b")
+        # gemma3:1b로 테스트
+        llm = get_provider("ollama", "gemma3:1b")
         console.print("[green]✓ LLM 프로바이더 초기화 성공[/green]")
         
         # 간단한 프롬프트 테스트
@@ -166,7 +166,7 @@ def multiply(a, b):
             
             # 분석기 초기화
             git_analyzer = GitAnalyzer(tmpdir)
-            llm = get_provider("ollama", "deepseek-r1:1.5b")
+            llm = get_provider("ollama", "gemma3:1b")
             commit_analyzer = CommitAnalyzer(llm, git_analyzer)
             
             # 커밋 메시지 생성 테스트
@@ -226,7 +226,7 @@ def test_cache_functionality():
             
             # 분석기 초기화
             git_analyzer = GitAnalyzer(tmpdir)
-            llm = get_provider("ollama", "deepseek-r1:1.5b")
+            llm = get_provider("ollama", "gemma3:1b")
             commit_analyzer = CommitAnalyzer(llm, git_analyzer)
             
             # 첫 번째 실행 (캐시 미스)
@@ -275,12 +275,12 @@ def test_configuration():
     for key, value in settings.items():
         console.print(f"  {key}: [green]{value}[/green]")
     
-    # deepseek-r1:1.5b가 기본 모델인지 확인
-    if Config.DEFAULT_MODEL == "deepseek-r1:1.5b":
-        console.print("\n[green]✓ deepseek-r1:1.5b가 기본 모델로 설정되어 있습니다[/green]")
+    # gemma3:1b가 기본 모델인지 확인
+    if Config.DEFAULT_MODEL == "gemma3:1b":
+        console.print("\n[green]✓ gemma3:1b가 기본 모델로 설정되어 있습니다[/green]")
     else:
         console.print(f"\n[yellow]! 기본 모델이 {Config.DEFAULT_MODEL}입니다[/yellow]")
-        console.print("[dim]  .env 파일에서 DEFAULT_MODEL=deepseek-r1:1.5b로 설정하세요[/dim]")
+        console.print("[dim]  .env 파일에서 DEFAULT_MODEL=gemma3:1b로 설정하세요[/dim]")
     
     return True
 

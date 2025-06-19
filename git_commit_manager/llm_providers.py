@@ -63,7 +63,7 @@ class LLMProvider(ABC):
 class OllamaProvider(LLMProvider):
     """Ollama 로컬 모델 프로바이더 (requests API 사용)"""
     
-    def __init__(self, model_name: str = "deepseek-r1:1.5b", max_retries: int = 3):
+    def __init__(self, model_name: str = "gemma3:1b", max_retries: int = 3):
         super().__init__(max_retries=max_retries)
         self.model_name = model_name
         self.base_url = "http://localhost:11434"
