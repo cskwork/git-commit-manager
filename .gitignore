@@ -47,7 +47,11 @@ htmlcov/
 .coverage.*
 .cache
 .pytest_cache/
-
+_test/
+__pycache__/
 # Documentation
 docs/_build/ 
 .claude/
+.env
+.claude/
+.mypy_cache/

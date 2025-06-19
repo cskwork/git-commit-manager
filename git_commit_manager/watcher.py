@@ -1,6 +1,7 @@
 """파일 시스템 변경사항 감시 모듈"""
 
 import time
+import hashlib
 from pathlib import Path
 from typing import Callable, Optional, Set
 from watchdog.observers import Observer
@@ -11,6 +12,7 @@ from rich.panel import Panel
 from rich.text import Text
 from .git_analyzer import GitAnalyzer
 from .commit_analyzer import CommitAnalyzer
+from .config import Config
 
 
 console = Console()
@@ -25,8 +27,9 @@ class GitChangeHandler(FileSystemEventHandler):
         self.commit_analyzer = commit_analyzer
         self.on_change_callback = on_change_callback
         self.last_check_time = time.time()
-        self.debounce_seconds = 2  # 변경사항을 모으기 위한 대기 시간
+        self.debounce_seconds = Config.get_debounce_delay()  # 설정에서 디바운스 시간 가져오기
         self.pending_check = False
+        self.last_processed_hash = None  # 마지막 처리된 변경사항의 해시값
         self._ignored_patterns = {'.git/', '__pycache__/', '.pyc', '.pyo', '.DS_Store'}
         
     def should_ignore(self, path: str) -> bool:
@@ -36,6 +39,17 @@ class GitChangeHandler(FileSystemEventHandler):
             if pattern in path_str:
                 return True
         return False
+    
+    def _get_changes_hash(self) -> str:
+        """현재 변경사항의 해시값 생성"""
+        try:
+            changes = self.git.get_all_changes()
+            # 변경사항을 문자열로 변환하여 해시 생성
+            changes_str = str(sorted(changes.items()))
+            return hashlib.md5(changes_str.encode()).hexdigest()
+        except Exception:
+            # Git 상태를 읽을 수 없는 경우 현재 시간 기반 해시 반환
+            return hashlib.md5(str(time.time()).encode()).hexdigest()
         
     def on_any_event(self, event: FileSystemEvent):
         """모든 파일 시스템 이벤트 처리"""
@@ -48,8 +62,14 @@ class GitChangeHandler(FileSystemEventHandler):
             self.pending_check = True
             return
             
+        # 변경사항 해시 확인하여 중복 처리 방지
+        current_hash = self._get_changes_hash()
+        if current_hash == self.last_processed_hash:
+            return
+            
         self.last_check_time = current_time
         self.pending_check = False
+        self.last_processed_hash = current_hash
         
         if self.on_change_callback:
             self.on_change_callback()
@@ -92,18 +112,21 @@ class GitWatcher:
             border_style="green"
         ))
         
-        # 코드 리뷰 수행
-        console.print("\n[cyan]코드 리뷰 수행 중...[/cyan]")
-        reviews = self.commit_analyzer.review_code_changes(chunks)
-        
-        for review in reviews:
-            console.print(Panel(
-                f"[yellow]파일:[/yellow] {review['file']}\n"
-                f"[yellow]타입:[/yellow] {review['type']}\n\n"
-                f"{review['review']}",
-                title="[bold blue]코드 리뷰[/bold blue]",
-                border_style="blue"
-            ))
+        # 설정에 따라 자동 코드 리뷰 수행
+        if Config.is_auto_review_enabled():
+            console.print("\n[cyan]코드 리뷰 수행 중...[/cyan]")
+            reviews = self.commit_analyzer.review_code_changes(chunks)
+            
+            for review in reviews:
+                console.print(Panel(
+                    f"[yellow]파일:[/yellow] {review['file']}\n"
+                    f"[yellow]타입:[/yellow] {review['type']}\n\n"
+                    f"{review['review']}",
+                    title="[bold blue]코드 리뷰[/bold blue]",
+                    border_style="blue"
+                ))
+        else:
+            console.print("\n[dim]자동 코드 리뷰가 비활성화되어 있습니다. (AUTO_CODE_REVIEW=false)[/dim]")
             
     def _display_changes(self, changes: dict):
         """변경사항을 보기 좋게 표시"""
@@ -159,9 +182,15 @@ class GitWatcher:
                 # 디바운싱된 체크 수행
                 if self.handler.pending_check and \
                    time.time() - self.handler.last_check_time >= self.handler.debounce_seconds:
-                    self.handler.pending_check = False
-                    self.handler.last_check_time = time.time()
-                    self.on_changes_detected()
+                    # 변경사항 해시 확인하여 중복 처리 방지
+                    current_hash = self.handler._get_changes_hash()
+                    if current_hash != self.handler.last_processed_hash:
+                        self.handler.pending_check = False
+                        self.handler.last_check_time = time.time()
+                        self.handler.last_processed_hash = current_hash
+                        self.on_changes_detected()
+                    else:
+                        self.handler.pending_check = False
         except KeyboardInterrupt:
             self.stop()
             

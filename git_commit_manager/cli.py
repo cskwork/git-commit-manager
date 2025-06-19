@@ -11,6 +11,7 @@ from .git_analyzer import GitAnalyzer
 from .commit_analyzer import CommitAnalyzer
 from .llm_providers import get_provider, OllamaProvider
 from .watcher import GitWatcher
+from .config import Config
 
 
 console = Console()
@@ -57,12 +58,18 @@ def _check_and_suggest_ollama_model(model: Optional[str] = None) -> str:
 
 @cli.command()
 @click.option('--provider', '-p', type=click.Choice(['ollama', 'openrouter', 'gemini']), 
-              default='ollama', help='사용할 LLM 프로바이더')
-@click.option('--model', '-m', help='사용할 모델 이름')
+              help='사용할 LLM 프로바이더 (기본값: .env의 DEFAULT_PROVIDER)')
+@click.option('--model', '-m', help='사용할 모델 이름 (기본값: .env의 DEFAULT_MODEL)')
 @click.option('--repo', '-r', default='.', help='Git 저장소 경로')
 def watch(provider, model, repo):
     """Git 저장소 변경사항을 실시간으로 감시합니다."""
     try:
+        # 설정에서 기본값 가져오기
+        if provider is None:
+            provider = Config.get_default_provider()
+        if model is None:
+            model = Config.get_default_model()
+            
         # Git 분석기 초기화
         git_analyzer = GitAnalyzer(repo)
         
@@ -92,12 +99,18 @@ def watch(provider, model, repo):
 
 @cli.command()
 @click.option('--provider', '-p', type=click.Choice(['ollama', 'openrouter', 'gemini']), 
-              default='ollama', help='사용할 LLM 프로바이더')
-@click.option('--model', '-m', help='사용할 모델 이름')
+              help='사용할 LLM 프로바이더 (기본값: .env의 DEFAULT_PROVIDER)')
+@click.option('--model', '-m', help='사용할 모델 이름 (기본값: .env의 DEFAULT_MODEL)')
 @click.option('--repo', '-r', default='.', help='Git 저장소 경로')
 def analyze(provider, model, repo):
     """현재 변경사항을 분석하고 커밋 메시지를 생성합니다."""
     try:
+        # 설정에서 기본값 가져오기
+        if provider is None:
+            provider = Config.get_default_provider()
+        if model is None:
+            model = Config.get_default_model()
+            
         # Git 분석기 초기화
         git_analyzer = GitAnalyzer(repo)
         
@@ -143,13 +156,19 @@ def analyze(provider, model, repo):
 
 @cli.command()
 @click.option('--provider', '-p', type=click.Choice(['ollama', 'openrouter', 'gemini']), 
-              default='ollama', help='사용할 LLM 프로바이더')
-@click.option('--model', '-m', help='사용할 모델 이름')
+              help='사용할 LLM 프로바이더 (기본값: .env의 DEFAULT_PROVIDER)')
+@click.option('--model', '-m', help='사용할 모델 이름 (기본값: .env의 DEFAULT_MODEL)')
 @click.option('--repo', '-r', default='.', help='Git 저장소 경로')
 @click.option('--file', '-f', help='특정 파일만 리뷰')
 def review(provider, model, repo, file):
     """변경된 코드에 대한 리뷰를 수행합니다."""
     try:
+        # 설정에서 기본값 가져오기
+        if provider is None:
+            provider = Config.get_default_provider()
+        if model is None:
+            model = Config.get_default_model()
+            
         # Git 분석기 초기화
         git_analyzer = GitAnalyzer(repo)
         
@@ -220,11 +239,22 @@ def config():
     console.print("   - 사용 예: gcm watch -p gemini -m gemini-pro\n")
     
     console.print("4. [yellow].env 파일 생성 (선택사항):[/yellow]")
-    console.print("   프로젝트 루트에 .env 파일을 생성하여 API 키를 저장할 수 있습니다:")
+    console.print("   프로젝트 루트에 .env 파일을 생성하여 설정을 저장할 수 있습니다:")
     console.print("   ```")
+    console.print("   # 기본 LLM 프로바이더 및 모델 설정")
+    console.print("   DEFAULT_PROVIDER=ollama")
+    console.print("   DEFAULT_MODEL=gemma3:1b")
+    console.print("   ")
+    console.print("   # API 키")
     console.print("   OPENROUTER_API_KEY=your-openrouter-key")
     console.print("   GEMINI_API_KEY=your-gemini-key")
+    console.print("   ")
+    console.print("   # 고급 설정")
+    console.print("   DEBOUNCE_DELAY=3.0  # 파일 변경 후 대기 시간(초)")
+    console.print("   COMMIT_MESSAGE_LANGUAGE=korean  # 커밋 메시지 언어")
+    console.print("   AUTO_CODE_REVIEW=true  # 자동 코드 리뷰 활성화")
     console.print("   ```")
+    console.print("\n   [dim].env.example 파일을 참고하여 설정하세요.[/dim]")
     
     # 현재 설치된 Ollama 모델 확인
     console.print("\n5. [yellow]현재 설치된 Ollama 모델:[/yellow]")
