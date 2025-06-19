@@ -39,6 +39,10 @@ gcm watch  # 실행
 - 📝 **코드 리뷰**: 변경된 코드에 대한 AI 기반 리뷰 제공
 - 🔧 **다양한 LLM 지원**: Ollama (로컬), OpenRouter, Google Gemini
 - 🎯 **스마트 모델 선택**: 설치된 Ollama 모델 자동 감지 및 추천
+- 🌐 **다국어 지원**: 한국어, 영어, 일본어, 중국어, 스페인어, 프랑스어, 독일어
+- ⚙️ **유연한 설정**: .env 파일을 통한 기본 설정 및 동작 사용자화
+- 🔄 **중복 처리 방지**: 동일한 변경사항에 대한 중복 분석 자동 방지
+- 🎛️ **자동 리뷰 토글**: 필요에 따라 자동 코드 리뷰 활성화/비활성화
 
 ## 상세 설치 가이드
 
@@ -85,10 +89,24 @@ export GEMINI_API_KEY='your-api-key'
 ### 3. 환경변수 설정 (선택사항)
 
 프로젝트 루트에 `.env` 파일 생성:
-```
+```bash
+# 기본 LLM 프로바이더 및 모델 설정
+DEFAULT_PROVIDER=ollama
+DEFAULT_MODEL=gemma3:1b
+
+# API 키
 OPENROUTER_API_KEY=your-openrouter-key
 GEMINI_API_KEY=your-gemini-key
+
+# 고급 설정
+DEBOUNCE_DELAY=3.0  # 파일 변경 후 대기 시간(초)
+COMMIT_MESSAGE_LANGUAGE=korean  # 커밋 메시지 언어
+AUTO_CODE_REVIEW=true  # 자동 코드 리뷰 활성화
 ```
+
+**설정 가능한 언어**: korean, english, japanese, chinese, spanish, french, german
+
+`.env.example` 파일을 참고하여 필요한 설정을 복사하세요.
 
 ## 사용법
 
@@ -142,8 +160,8 @@ gcm config
 ## 명령어 옵션
 
 ### 공통 옵션
-- `-p, --provider`: LLM 프로바이더 선택 (ollama, openrouter, gemini)
-- `-m, --model`: 사용할 모델 이름
+- `-p, --provider`: LLM 프로바이더 선택 (ollama, openrouter, gemini) - 미지정시 .env의 DEFAULT_PROVIDER 사용
+- `-m, --model`: 사용할 모델 이름 - 미지정시 .env의 DEFAULT_MODEL 사용
 - `-r, --repo`: Git 저장소 경로 (기본값: 현재 디렉토리)
 
 ### watch 명령어
