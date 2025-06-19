@@ -55,3 +55,4 @@ docs/_build/
 .env
 .claude/
 .mypy_cache/
+.git_commit_manager_cache/

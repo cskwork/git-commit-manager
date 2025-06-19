@@ -1,23 +1,25 @@
 from setuptools import setup, find_packages
+from pathlib import Path
+
+# Read the contents of README.md
+this_directory = Path(__file__).parent
+long_description = (this_directory / "README.md").read_text(encoding='utf-8')
+
+# Read the contents of requirements.txt
+with open('requirements.txt', encoding='utf-8') as f:
+    requirements = f.read().splitlines()
 
 setup(
     name="git-commit-manager",
     version="0.1.0",
     packages=find_packages(),
-    install_requires=[
-        "watchdog>=3.0.0",
-        "gitpython>=3.1.40",
-        "click>=8.1.7",
-        "requests>=2.31.0",
-        "python-dotenv>=1.0.0",
-        "rich>=13.7.0",
-        "ollama>=0.1.7",
-        "google-generativeai>=0.3.2",
-    ],
+    install_requires=requirements,
     entry_points={
         "console_scripts": [
             "gcm=git_commit_manager.cli:main",
         ],
     },
+    long_description=long_description,
+    long_description_content_type='text/markdown',
     python_requires=">=3.8",
 ) 

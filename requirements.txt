@@ -1,8 +1,19 @@
+# Git Commit Manager 필수 패키지
+
+# 핵심 의존성
+GitPython>=3.1.0
 watchdog>=3.0.0
-gitpython>=3.1.40
-click>=8.1.7
-requests>=2.31.0
+click>=8.1.0
+rich>=13.0.0
 python-dotenv>=1.0.0
-rich>=13.7.0
-ollama>=0.1.7
-google-generativeai>=0.3.2 
+pyperclip
+
+# LLM 프로바이더
+requests>=2.31.0
+
+# 선택적 LLM 프로바이더 (필요시 설치)
+# ollama>=0.1.0  # Ollama 사용시
+# google-generativeai>=0.3.0  # Gemini 사용시
+
+# 선택적 기능
+# pyperclip>=1.8.0  # 클립보드 복사 기능 

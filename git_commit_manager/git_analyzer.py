@@ -1,167 +1,335 @@
 """Git 변경사항 분석 모듈"""
 
 import os
-from typing import List, Dict, Tuple, Optional
-from git import Repo
+from typing import List, Dict, Tuple, Optional, Iterator
+from git import Repo, diff
 from pathlib import Path
+from .config import Config
 
 
 class GitAnalyzer:
     """Git 저장소 변경사항 분석 클래스"""
     
+    EMPTY_TREE_SHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
     def __init__(self, repo_path: str = "."):
         self.repo_path = Path(repo_path).resolve()
         try:
             self.repo = Repo(self.repo_path)
         except Exception as e:
             raise ValueError(f"유효한 Git 저장소가 아닙니다: {repo_path}") from e
-            
-    def get_staged_changes(self) -> Dict[str, List[str]]:
-        """스테이징된 변경사항 가져오기"""
-        changes = {
-            'added': [],
-            'modified': [],
-            'deleted': [],
-            'renamed': []
-        }
         
-        # 스테이징된 변경사항
-        diff = self.repo.index.diff("HEAD")
-        for item in diff:
-            if item.new_file:
-                changes['added'].append(item.a_path)
-            elif item.deleted_file:
-                changes['deleted'].append(item.a_path)
-            elif item.renamed:
-                changes['renamed'].append((item.rename_from, item.rename_to))
-            else:
-                changes['modified'].append(item.a_path)
+        self.head_commit = self.repo.head.commit if self.repo.head.is_valid() else self.EMPTY_TREE_SHA
+        self.ignore_patterns = Config.IGNORE_PATTERNS
+        self.max_file_size = Config.MAX_FILE_SIZE_MB * 1024 * 1024  # MB를 바이트로 변환
+
+    def should_ignore_file(self, file_path: str) -> bool:
+        """파일을 무시해야 하는지 확인"""
+        for pattern in self.ignore_patterns:
+            if pattern in file_path:
+                return True
+        
+        # 파일 크기 확인
+        full_path = self.repo_path / file_path
+        if full_path.exists() and full_path.is_file():
+            if full_path.stat().st_size > self.max_file_size:
+                return True
                 
-        return changes
-        
-    def get_unstaged_changes(self) -> Dict[str, List[str]]:
-        """스테이징되지 않은 변경사항 가져오기"""
-        changes = {
-            'modified': [],
-            'deleted': []
-        }
-        
-        # 워킹 디렉토리 변경사항
-        diff = self.repo.index.diff(None)
-        for item in diff:
-            if item.deleted_file:
-                changes['deleted'].append(item.a_path)
-            else:
-                changes['modified'].append(item.a_path)
-                
-        # 추적되지 않은 파일
-        changes['untracked'] = self.repo.untracked_files
-        
-        return changes
-        
+        return False
+
     def get_all_changes(self) -> Dict[str, List[str]]:
         """모든 변경사항 가져오기 (스테이징 + 비스테이징)"""
-        staged = self.get_staged_changes()
-        unstaged = self.get_unstaged_changes()
         
-        all_changes = {}
-        for key in set(staged.keys()) | set(unstaged.keys()):
-            all_changes[key] = staged.get(key, []) + unstaged.get(key, [])
-            
-        return all_changes
-        
-    def get_file_diff(self, file_path: str, staged: bool = True) -> Optional[str]:
-        """특정 파일의 diff 가져오기"""
-        try:
-            if staged:
-                # 스테이징된 변경사항
-                diff = self.repo.git.diff('--cached', file_path)
-            else:
-                # 워킹 디렉토리 변경사항
-                diff = self.repo.git.diff(file_path)
+        all_changes: Dict[str, set] = {
+            'added': set(),
+            'modified': set(),
+            'deleted': set(),
+            'renamed': set(),
+            'untracked': set(),
+        }
+
+        # Staged changes
+        staged_diff = self.repo.index.diff(self.head_commit)
+        for d in staged_diff:
+            if self.should_ignore_file(d.a_path or d.b_path):
+                continue
                 
-            return diff if diff else None
-        except Exception:
-            return None
-            
-    def get_diff_chunks(self, max_chunk_size: int = 1000) -> List[Dict[str, str]]:
-        """변경사항을 작은 청크로 분할"""
-        chunks = []
-        all_changes = self.get_all_changes()
-        
-        for change_type, files in all_changes.items():
-            if change_type == 'renamed':
-                # renamed는 튜플 리스트
-                for old_name, new_name in files:
-                    chunks.append({
-                        'type': 'renamed',
-                        'old_path': old_name,
-                        'new_path': new_name,
-                        'diff': f"Renamed: {old_name} -> {new_name}"
-                    })
+            if d.new_file:
+                all_changes['added'].add(d.a_path)
+            elif d.deleted_file:
+                all_changes['deleted'].add(d.a_path)
+            elif d.renamed:
+                all_changes['renamed'].add((d.rename_from, d.rename_to))
             else:
-                for file_path in files:
-                    # 스테이징된 diff 먼저 확인
-                    diff = self.get_file_diff(file_path, staged=True)
-                    if not diff:
-                        # 스테이징되지 않은 diff 확인
-                        diff = self.get_file_diff(file_path, staged=False)
-                        
-                    if diff:
-                        # diff가 너무 크면 청크로 분할
-                        if len(diff) > max_chunk_size:
-                            lines = diff.split('\n')
-                            current_chunk = []
-                            current_size = 0
-                            
-                            for line in lines:
-                                current_chunk.append(line)
-                                current_size += len(line) + 1
-                                
-                                if current_size >= max_chunk_size:
-                                    chunks.append({
-                                        'type': change_type,
-                                        'path': file_path,
-                                        'diff': '\n'.join(current_chunk)
-                                    })
-                                    current_chunk = []
-                                    current_size = 0
-                                    
-                            if current_chunk:
-                                chunks.append({
-                                    'type': change_type,
-                                    'path': file_path,
-                                    'diff': '\n'.join(current_chunk)
-                                })
-                        else:
-                            chunks.append({
-                                'type': change_type,
-                                'path': file_path,
-                                'diff': diff
-                            })
-                    elif change_type == 'untracked':
-                        # 추적되지 않은 파일의 내용
-                        try:
-                            file_full_path = self.repo_path / file_path
-                            with open(file_full_path, 'r', encoding='utf-8') as f:
-                                content = f.read()
-                                if len(content) > max_chunk_size:
-                                    # 내용이 너무 크면 일부만
-                                    content = content[:max_chunk_size] + "\n... (truncated)"
-                                chunks.append({
-                                    'type': 'untracked',
-                                    'path': file_path,
-                                    'diff': f"New file:\n{content}"
-                                })
-                        except Exception:
-                            chunks.append({
-                                'type': 'untracked',
-                                'path': file_path,
-                                'diff': "New file (content unavailable)"
-                            })
-                            
-        return chunks
+                all_changes['modified'].add(d.a_path)
+
+        # Unstaged changes
+        unstaged_diff = self.repo.index.diff(None)
+        for d in unstaged_diff:
+            if self.should_ignore_file(d.a_path or d.b_path):
+                continue
+                
+            if d.change_type == 'D':
+                # Already staged for deletion, now removed from filesystem
+                if d.a_path not in all_changes['deleted']:
+                    all_changes['deleted'].add(d.a_path)
+            else: # A, M
+                 # If a file was added and then modified, it is still 'added'
+                if d.a_path not in all_changes['added']:
+                    all_changes['modified'].add(d.a_path)
         
+        # Untracked files
+        for f in self.repo.untracked_files:
+            if not self.should_ignore_file(f):
+                all_changes['untracked'].add(f)
+            
+        # Convert sets to lists
+        return {k: sorted(list(v)) for k, v in all_changes.items()}
+        
+    def get_diff_chunks(self, max_chunk_size: int = None) -> List[Dict[str, str]]:
+        """변경사항을 의미있는 청크로 분할"""
+        if max_chunk_size is None:
+            max_chunk_size = Config.MAX_CHUNK_SIZE
+            
+        chunks = []
+        
+        # Staged diffs
+        staged_diff = self.repo.index.diff(self.head_commit, create_patch=True)
+        for d in staged_diff:
+            if self.should_ignore_file(d.a_path or d.b_path):
+                continue
+                
+            chunks.extend(self._process_diff_item(d, max_chunk_size))
+
+        # Unstaged diffs
+        unstaged_diff = self.repo.index.diff(None, create_patch=True)
+        for d in unstaged_diff:
+            if self.should_ignore_file(d.a_path or d.b_path):
+                continue
+                
+            chunks.extend(self._process_diff_item(d, max_chunk_size))
+
+        # Untracked files
+        for file_path in self.repo.untracked_files:
+            if self.should_ignore_file(file_path):
+                continue
+                
+            chunks.extend(self._process_untracked_file(file_path, max_chunk_size))
+
+        return chunks
+
+    def _process_diff_item(self, d: diff.Diff, max_chunk_size: int) -> List[Dict[str, str]]:
+        """개별 diff 항목 처리"""
+        chunks = []
+        change_type = self._get_change_type(d)
+        path = d.a_path or d.b_path
+        
+        if d.renamed:
+            chunks.append({
+                'type': 'renamed',
+                'old_path': d.rename_from,
+                'new_path': d.rename_to,
+                'diff': f"파일 이름 변경: {d.rename_from} → {d.rename_to}"
+            })
+        else:
+            # diff 내용을 스트림으로 처리하여 메모리 효율성 향상
+            try:
+                diff_text = d.diff.decode('utf-8', 'ignore')
+                if diff_text:
+                    self._split_diff_into_chunks(chunks, change_type, path, diff_text, max_chunk_size)
+            except Exception:
+                chunks.append({
+                    'type': change_type,
+                    'path': path,
+                    'diff': f"{change_type} 파일 (diff 내용을 읽을 수 없음)",
+                    'binary': True
+                })
+                
+        return chunks
+
+    def _process_untracked_file(self, file_path: str, max_chunk_size: int) -> List[Dict[str, str]]:
+        """추적되지 않은 파일 처리"""
+        chunks = []
+        
+        try:
+            full_path = self.repo_path / file_path
+            
+            # 바이너리 파일 확인
+            if self._is_binary_file(full_path):
+                chunks.append({
+                    'type': 'untracked',
+                    'path': file_path,
+                    'diff': "새 바이너리 파일",
+                    'binary': True
+                })
+                return chunks
+            
+            # 텍스트 파일 처리 (스트리밍)
+            with full_path.open('r', encoding='utf-8', errors='ignore') as f:
+                content_lines = []
+                current_size = 0
+                
+                for line in f:
+                    line_with_prefix = f"+{line}"
+                    line_size = len(line_with_prefix)
+                    
+                    if current_size + line_size > max_chunk_size and content_lines:
+                        # 현재 청크 저장
+                        chunks.append({
+                            'type': 'untracked',
+                            'path': file_path,
+                            'diff': ''.join(content_lines)
+                        })
+                        content_lines = []
+                        current_size = 0
+                    
+                    content_lines.append(line_with_prefix)
+                    current_size += line_size
+                
+                # 마지막 청크 저장
+                if content_lines:
+                    chunks.append({
+                        'type': 'untracked',
+                        'path': file_path,
+                        'diff': ''.join(content_lines)
+                    })
+                    
+        except Exception:
+            chunks.append({
+                'type': 'untracked',
+                'path': file_path,
+                'diff': "새 파일 (내용을 읽을 수 없음)"
+            })
+            
+        return chunks
+
+    def _is_binary_file(self, file_path: Path) -> bool:
+        """파일이 바이너리인지 확인"""
+        try:
+            with file_path.open('rb') as f:
+                # 첫 1024 바이트만 읽어서 확인
+                chunk = f.read(1024)
+                return b'\0' in chunk
+        except Exception:
+            return False
+
+    def _split_diff_into_chunks(self, chunks: list, change_type: str, path: str, diff_text: str, max_chunk_size: int):
+        """diff 텍스트를 청크로 분할"""
+        if not diff_text:
+            return
+
+        if len(diff_text) <= max_chunk_size:
+            chunks.append({
+                'type': change_type, 
+                'path': path, 
+                'diff': diff_text
+            })
+            return
+
+        # 헤더와 변경사항을 분리
+        lines = diff_text.split('\n')
+        header_lines = []
+        content_lines = []
+        
+        for line in lines:
+            if line.startswith(('---', '+++', '@@')):
+                header_lines.append(line)
+            else:
+                content_lines.append(line)
+        
+        # 함수/클래스 단위로 청크 분할 시도
+        chunks_by_function = self._split_by_logical_units(content_lines, header_lines, change_type, path, max_chunk_size)
+        if chunks_by_function:
+            chunks.extend(chunks_by_function)
+        else:
+            # 논리적 단위로 분할할 수 없으면 크기 기준으로 분할
+            self._split_by_size(chunks, header_lines, content_lines, change_type, path, max_chunk_size)
+
+    def _split_by_logical_units(self, lines: List[str], header_lines: List[str], 
+                                change_type: str, path: str, max_chunk_size: int) -> List[Dict[str, str]]:
+        """함수/클래스 등 논리적 단위로 분할"""
+        chunks = []
+        current_chunk_lines = header_lines.copy()
+        current_size = sum(len(line) + 1 for line in current_chunk_lines)
+        
+        # 언어별 함수/클래스 시작 패턴
+        function_patterns = [
+            'def ', 'class ', 'function ', 'func ', 'const ', 'let ', 'var ',
+            'public ', 'private ', 'protected ', 'static '
+        ]
+        
+        for i, line in enumerate(lines):
+            # 함수/클래스 시작 감지
+            is_new_unit = any(pattern in line for pattern in function_patterns)
+            line_size = len(line) + 1
+            
+            if is_new_unit and current_size > len('\n'.join(header_lines)) + 100:  # 최소 크기
+                if current_size + line_size > max_chunk_size:
+                    # 현재 청크 저장
+                    chunks.append({
+                        'type': change_type,
+                        'path': path,
+                        'diff': '\n'.join(current_chunk_lines)
+                    })
+                    current_chunk_lines = header_lines.copy()
+                    current_size = sum(len(line) + 1 for line in current_chunk_lines)
+            
+            current_chunk_lines.append(line)
+            current_size += line_size
+            
+            # 크기 초과시 강제 분할
+            if current_size > max_chunk_size:
+                chunks.append({
+                    'type': change_type,
+                    'path': path,
+                    'diff': '\n'.join(current_chunk_lines)
+                })
+                current_chunk_lines = header_lines.copy()
+                current_size = sum(len(line) + 1 for line in current_chunk_lines)
+        
+        # 마지막 청크
+        if len(current_chunk_lines) > len(header_lines):
+            chunks.append({
+                'type': change_type,
+                'path': path,
+                'diff': '\n'.join(current_chunk_lines)
+            })
+            
+        return chunks
+
+    def _split_by_size(self, chunks: list, header_lines: List[str], content_lines: List[str],
+                      change_type: str, path: str, max_chunk_size: int):
+        """크기 기준으로 분할"""
+        current_chunk_lines = header_lines.copy()
+        current_size = sum(len(line) + 1 for line in current_chunk_lines)
+        
+        for line in content_lines:
+            line_size = len(line) + 1
+            if current_size + line_size > max_chunk_size and len(current_chunk_lines) > len(header_lines):
+                chunks.append({
+                    'type': change_type,
+                    'path': path,
+                    'diff': '\n'.join(current_chunk_lines)
+                })
+                current_chunk_lines = header_lines.copy()
+                current_size = sum(len(line) + 1 for line in current_chunk_lines)
+            
+            current_chunk_lines.append(line)
+            current_size += line_size
+
+        if len(current_chunk_lines) > len(header_lines):
+            chunks.append({
+                'type': change_type,
+                'path': path,
+                'diff': '\n'.join(current_chunk_lines)
+            })
+
+    def _get_change_type(self, d: diff.Diff) -> str:
+        if d.new_file: return 'added'
+        if d.deleted_file: return 'deleted'
+        if d.renamed: return 'renamed'
+        return 'modified'
+            
     def get_current_branch(self) -> str:
         """현재 브랜치 이름 가져오기"""
         try:
@@ -174,4 +342,15 @@ class GitAnalyzer:
         try:
             return self.repo.head.commit.message.strip()
         except Exception:
-            return "No commits yet" 
+            return "커밋 없음"
+            
+    def get_file_content_stream(self, file_path: str) -> Iterator[str]:
+        """파일 내용을 스트림으로 반환 (메모리 효율적)"""
+        full_path = self.repo_path / file_path
+        
+        if not full_path.exists():
+            return
+            
+        with full_path.open('r', encoding='utf-8', errors='ignore') as f:
+            for line in f:
+                yield line 
