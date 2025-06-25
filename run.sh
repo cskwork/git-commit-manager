@@ -128,20 +128,20 @@ ollama_setup() {
         ollama list
         
         # Check for recommended model
-        if ! ollama list | grep -q "gemma3:1b"; then
+        if ! ollama list | grep -q "gemma3:latest"; then
             echo
-            read -p "Install recommended model gemma3:1b (~1GB)? (y/N): " INSTALL_MODEL
+            read -p "Install recommended model gemma3:latest (~3GB)? (y/N): " INSTALL_MODEL
             if [[ $INSTALL_MODEL =~ ^[Yy]$ ]]; then
-                echo "Downloading gemma3:1b model (this may take a few minutes)..."
-                ollama pull gemma3:1b
+                echo "Downloading gemma3:latest model (this may take a few minutes)..."
+                ollama pull gemma3:latest
                 if [ $? -ne 0 ]; then
                     echo "[WARNING] Failed to download model. You can try again later."
                 else
-                    echo "[OK] gemma3:1b model installed successfully."
+                    echo "[OK] gemma3:latest model installed successfully."
                 fi
             fi
         else
-            echo "[OK] Recommended model gemma3:1b is already installed."
+            echo "[OK] Recommended model gemma3:latest is already installed."
         fi
     fi
 

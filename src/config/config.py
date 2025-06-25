@@ -14,6 +14,9 @@ load_dotenv()
 class Config:
     """애플리케이션 설정"""
     
+    # 로깅 설정
+    LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+    
     # API 키 (검증된 형태로 저장)
     OPENROUTER_API_KEY = None
     GEMINI_API_KEY = None
@@ -117,6 +120,27 @@ class Config:
         if not cache_dir.exists():
             cache_dir.mkdir(parents=True, exist_ok=True)
         return cache_dir
+    
+    @classmethod
+    def setup_logging(cls):
+        """환경변수 LOG_LEVEL에 따라 로깅 레벨 설정"""
+        # 유효한 로그 레벨 확인
+        valid_levels = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
+        log_level = cls.LOG_LEVEL if cls.LOG_LEVEL in valid_levels else 'INFO'
+        
+        # 숫자형 로그 레벨로 변환
+        numeric_level = getattr(logging, log_level, logging.INFO)
+        
+        # 로깅 설정
+        logging.basicConfig(
+            level=numeric_level,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        
+        # 로그 레벨이 기본값과 다르면 알림
+        if cls.LOG_LEVEL != 'INFO':
+            logging.info(f"로깅 레벨이 {log_level}로 설정되었습니다")
     
     @classmethod
     def to_dict(cls) -> Dict[str, Any]:

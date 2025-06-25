@@ -122,20 +122,20 @@ if not errorlevel 1 (
     ollama list
 
     REM Check for recommended model
-    ollama list | findstr "gemma3:1b" >nul
+    ollama list | findstr "gemma3:latest" >nul
     if errorlevel 1 (
         echo.
-        set /p INSTALL_MODEL="Install recommended model gemma3:1b (~1GB)? (y/N): "
+        set /p INSTALL_MODEL="Install recommended model gemma3:latest (~3GB)? (y/N): "
         if /i "!INSTALL_MODEL!"=="y" (
-            echo Downloading gemma3:1b model (this may take a few minutes)...
-            ollama pull gemma3:1b
+            echo Downloading gemma3:latest model (this may take a few minutes)...
+            ollama pull gemma3:latest
             if errorlevel 1 (
                 echo [WARNING] Failed to download model. You can try again later.
             )
         )
     )
     if not errorlevel 1 (
-        echo [OK] Recommended model gemma3:1b is already installed.
+        echo [OK] Recommended model gemma3:latest is already installed.
     )
 )
 

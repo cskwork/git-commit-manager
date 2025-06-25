@@ -2,6 +2,7 @@
 
 import time
 import hashlib
+import logging
 import threading
 import queue
 from pathlib import Path
@@ -217,7 +218,7 @@ class GitWatcher:
         # 이미 분석 중인 경우 건너뛰기
         with self._analysis_lock:
             if self._is_analyzing:
-                console.print("[dim]이미 분석이 진행 중입니다. 건너뜁니다.[/dim]")
+                logging.debug("이미 분석이 진행 중입니다. 건너뜁니다.")
                 return
             self._is_analyzing = True
         
@@ -225,21 +226,21 @@ class GitWatcher:
             self.analysis_count += 1
             timestamp = datetime.now().strftime("%H:%M:%S")
             
-            console.print(f"\n[yellow]변경사항 감지됨! [{timestamp}][/yellow]")
+            logging.debug(f"변경사항 감지됨! [{timestamp}]")
             
             # 변경사항 해시 확인
             current_hash = self.handler._get_changes_hash()
             if current_hash == self.handler.last_processed_hash:
-                console.print("[dim]이미 처리된 변경사항입니다.[/dim]")
-                console.print(f"[dim]현재 해시: {current_hash[:8]}...[/dim]")
+                logging.debug("이미 처리된 변경사항입니다.")
+                logging.debug(f"현재 해시: {current_hash[:8]}...")
                 return
                 
-            console.print(f"[dim]새로운 변경사항 감지됨 (해시: {current_hash[:8]}...)[/dim]")
+            logging.debug(f"새로운 변경사항 감지됨 (해시: {current_hash[:8]}...)")
             
             # 변경사항 분석
             changes = self.git.get_all_changes()
             if not any(changes.values()):
-                console.print("[dim]변경사항이 없습니다.[/dim]")
+                logging.debug("변경사항이 없습니다.")
                 return
             
             # 변경사항 표시
@@ -265,7 +266,7 @@ class GitWatcher:
                     chunks = self.git.get_diff_chunks()
                     if not chunks:
                         progress.stop()
-                        console.print("[yellow]분석할 변경사항이 없습니다.[/yellow]")
+                        logging.debug("분석할 변경사항이 없습니다.")
                         return
                         
                     commit_message = self.commit_analyzer.generate_commit_message(chunks)
@@ -285,13 +286,10 @@ class GitWatcher:
                     # 코드 리뷰 실행 여부 확인
                     should_review = Config.AUTO_CODE_REVIEW
                     
+                    # AUTO_CODE_REVIEW가 false이면 리뷰를 건너뜀
                     if not Config.AUTO_CODE_REVIEW:
-                        try:
-                            user_input = input("\n코드 리뷰를 실행하시겠습니까? (y/N): ").strip().lower()
-                            should_review = user_input in ['y', 'yes', 'ㅇ']
-                        except (EOFError, KeyboardInterrupt):
-                            should_review = False
-                            console.print("\n[yellow]코드 리뷰가 취소되었습니다.[/yellow]")
+                        should_review = False
+                        logging.debug("AUTO_CODE_REVIEW=false로 설정되어 코드 리뷰를 건너뜁니다.")
                     
                     if should_review:
                         # 새로운 Progress 인스턴스 생성
@@ -327,7 +325,7 @@ class GitWatcher:
                             else:
                                 console.print("\n[green]✓ 코드가 깔끔합니다! 리뷰할 내용이 없습니다.[/green]")
                     else:
-                        console.print("\n[dim]코드 리뷰를 건너뜁니다.[/dim]")
+                        logging.debug("코드 리뷰를 건너뜁니다.")
             
             finally:
                 # Progress가 아직 실행 중이면 중지
@@ -350,7 +348,7 @@ class GitWatcher:
             self.handler.performance.record_error()
             # 스택 트레이스 표시 (디버깅용)
             import traceback
-            console.print(f"[dim]{traceback.format_exc()}[/dim]")
+            logging.debug(f"스택 트레이스: {traceback.format_exc()}")
         finally:
             # 분석 상태 해제
             with self._analysis_lock:
@@ -447,15 +445,15 @@ class GitWatcher:
         ))
         
         # 시작 시 현재 변경사항 확인
-        console.print("\n[dim]현재 변경사항 확인 중...[/dim]")
+        logging.debug("현재 변경사항 확인 중...")
         current_changes = self.git.get_all_changes()
         if any(current_changes.values()):
-            console.print("[yellow]기존 변경사항이 감지되었습니다. 분석을 시작합니다.[/yellow]")
+            logging.info("기존 변경사항이 감지되었습니다. 분석을 시작합니다.")
             # 약간의 지연 후 분석 실행
             time.sleep(1)
             self.on_changes_detected()
         else:
-            console.print("[dim]현재 변경사항이 없습니다.[/dim]")
+            logging.debug("현재 변경사항이 없습니다.")
         
         try:
             while True:
@@ -468,7 +466,7 @@ class GitWatcher:
         if not self.watching:
             return
         
-        console.print("\n[yellow]감시를 중지하는 중...[/yellow]")
+        logging.info("감시를 중지하는 중...")
         
         # 처리 스레드 중지
         self.handler.stop_processing()
@@ -481,4 +479,4 @@ class GitWatcher:
         # 최종 통계 표시
         self._display_statistics()
         
-        console.print("[red]감시가 중지되었습니다.[/red]") 
+        logging.info("감시가 중지되었습니다.") 

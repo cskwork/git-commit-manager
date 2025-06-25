@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import logging
 import time
 import re
 from typing import List, Dict, Optional, Tuple
@@ -77,45 +78,35 @@ class PromptTemplates:
     
     # 최적화된 커밋 메시지 생성용 시스템 프롬프트
     DEFAULT_COMMIT_SYSTEM_PROMPTS = {
-        "korean": """당신은 지시된 형식에 따라 Git 커밋 메시지를 생성하는 자동화된 도구입니다. 당신의 유일한 임무는 제공된 변경사항 요약을 바탕으로 Conventional Commit 형식의 커밋 메시지 텍스트를 생성하는 것입니다.
-
-응답은 항상 다음 형식으로 시작해야 합니다: `feat(<범위>): <제목>` 또는 `fix(<범위>): <제목>` 등. 다른 텍스트를 포함하지 마세요.
-
+"korean": """코드 변경을 감지하고 Conventional Commit 형식의 커밋 메시지 텍스트 생성.
 ### 출력 예시 ###
-feat(api): 사용자 인증 엔드포인트 추가
-
+feat: 사용자 인증 엔드포인트 추가
 - JWT 기반의 사용자 로그인 및 회원가입 API를 구현했습니다.
 - `/auth/login`, `/auth/register` 엔드포인트를 포함합니다.""",
-        
-        "english": """You are an automated tool that generates Git commit messages according to a specified format. Your sole task is to generate the text for a Conventional Commit message based on the provided summary of changes.
 
-Your response must always start with the format: `feat(<scope>): <subject>` or `fix(<scope>): <subject>`, etc. Do not include any other text.
-
+"english": """Generate the text for a Conventional Commit message based on the code changes.
 ### Example Output ###
-feat(api): add user authentication endpoint
-
+feat: add user authentication endpoint
 - Implemented JWT-based user login and registration API.
 - Includes `/auth/login` and `/auth/register` endpoints."""
     }
     
     # 최적화된 커밋 메시지 생성용 사용자 프롬프트
     DEFAULT_COMMIT_USER_PROMPTS = {
-        "korean": """### 변경사항 요약 ###
+"korean": """### 변경사항 요약 ###
 {changes_summary}
-
 ### 지시사항 ###
 위 변경사항에 대한 Conventional Commit 형식의 커밋 메시지를 생성하세요.""",
-        
-        "english": """### Change Summary ###
-{changes_summary}
 
+"english": """### Change Summary ###
+{changes_summary}
 ### Instructions ###
 Generate a Conventional Commit message for the changes above."""
     }
     
     # 최적화된 코드 리뷰용 시스템 프롬프트
     DEFAULT_REVIEW_SYSTEM_PROMPTS = {
-        "korean": """당신은 코드 리뷰를 수행하는 자동화된 도구입니다. 당신의 유일한 임무는 제공된 코드 변경사항에 대해 지정된 형식으로 리뷰를 생성하는 것입니다. 다른 텍스트를 포함하지 마세요.
+"korean": """당신은 코드 리뷰를 수행하는 자동화된 도구입니다. 당신의 유일한 임무는 제공된 코드 변경사항에 대해 지정된 형식으로 리뷰를 생성하는 것입니다. 다른 텍스트를 포함하지 마세요.
 
 ### 리뷰 형식 ###
 **💡 개선 제안:**
@@ -129,7 +120,7 @@ Generate a Conventional Commit message for the changes above."""
 
 해당 사항이 없으면 섹션을 생략하세요.""",
         
-        "english": """You are an automated tool that performs code reviews. Your sole task is to generate a review in the specified format for the provided code change. Do not include any other text.
+"english": """You are an automated tool that performs code reviews. Your sole task is to generate a review in the specified format for the provided code change. Do not include any other text.
 
 ### Review Format ###
 **💡 Suggestions for Improvement:**
@@ -157,7 +148,7 @@ Omit sections if they are not applicable."""
 ### 지시사항 ###
 위 코드 변경사항에 대한 리뷰를 생성하세요.""",
         
-        "english": """### Code Change ###
+"english": """### Code Change ###
 **File:** `{file_path}`
 **Change Type:** `{change_type}`
 
@@ -263,25 +254,41 @@ class CommitAnalyzer:
             chunks = self.git.get_diff_chunks(max_chunk_size=Config.MAX_CHUNK_SIZE)
             
         if not chunks:
+            logging.debug("리뷰할 청크가 없음")
             return []
-            
+        
+        logging.debug(f"총 {len(chunks)}개의 청크를 리뷰 대상으로 확인 중...")
+        
         reviews = []
         system_prompt = self._build_review_system_prompt()
+        reviewable_chunks = 0
+        skipped_chunks = 0
+        cache_hits = 0
         
         # 청크를 배치로 처리하여 효율성 향상
-        for chunk in chunks:
+        for i, chunk in enumerate(chunks):
+            file_path = chunk.get('path', 'unknown')
+            change_type = chunk.get('type', 'unknown')
+            diff_size = len(chunk.get('diff', ''))
+            
             if self._should_review_chunk(chunk):
+                reviewable_chunks += 1
+                logging.debug(f"청크 {i+1}/{len(chunks)}: {file_path} ({change_type}) - diff 크기: {diff_size}자 - 리뷰 대상")
+                
                 # 캐시 확인
                 chunk_str = json.dumps(chunk, sort_keys=True)
                 cached_review = self.cache.get("review", chunk_str)
                 
                 if cached_review:
+                    cache_hits += 1
+                    logging.debug(f"캐시에서 리뷰 결과 조회: {file_path}")
                     reviews.append({
                         'file': chunk['path'],
                         'type': chunk['type'],
                         'review': cached_review
                     })
                 else:
+                    logging.debug(f"새로운 리뷰 생성 시작: {file_path}")
                     review_response = self._review_single_chunk(chunk, system_prompt)
                     # review_response가 딕셔너리이므로 'review' 키에서 텍스트를 가져와 클린징
                     cleaned_review = self._clean_llm_output(review_response.get('review', ''))
@@ -290,7 +297,15 @@ class CommitAnalyzer:
                     reviews.append(review_response)
                     # 리뷰 캐싱
                     self.cache.set("review", chunk_str, cleaned_review)
-                
+                    logging.debug(f"리뷰 완료 및 캐시 저장: {file_path}")
+            else:
+                skipped_chunks += 1
+                # 스킵 이유 로깅
+                skip_reason = self._get_skip_reason(chunk)
+                logging.debug(f"청크 {i+1}/{len(chunks)}: {file_path} ({change_type}) - 스킵됨 - 이유: {skip_reason}")
+        
+        logging.debug(f"리뷰 처리 완료 - 총 청크: {len(chunks)}, 리뷰 대상: {reviewable_chunks}, 스킵: {skipped_chunks}, 캐시 히트: {cache_hits}")
+        
         return reviews
     
     def clear_cache(self):
@@ -421,6 +436,26 @@ class CommitAnalyzer:
             return chunk['type'] in ['added', 'modified', 'untracked']
             
         return False
+    
+    def _get_skip_reason(self, chunk: Dict[str, str]) -> str:
+        """청크가 스킵된 이유를 반환"""
+        # 바이너리 파일 체크
+        if chunk.get('binary', False):
+            return "바이너리 파일"
+        
+        file_path = chunk.get('path', '')
+        change_type = chunk.get('type', '')
+        
+        # 파일 확장자 체크
+        reviewable_extensions = {'.py', '.js', '.ts', '.java', '.cpp', '.c', '.go', '.rs', '.rb', '.php'}
+        if not any(file_path.endswith(ext) for ext in reviewable_extensions):
+            return f"지원하지 않는 파일 타입 ({Path(file_path).suffix or '확장자 없음'})"
+        
+        # 변경 타입 체크
+        if change_type not in ['added', 'modified', 'untracked']:
+            return f"리뷰 대상이 아닌 변경 타입 ({change_type})"
+        
+        return "알 수 없는 이유"
     
     def _summarize_changes(self, chunks: List[Dict[str, str]]) -> str:
         """변경사항을 요약하여 문자열로 반환"""

@@ -109,8 +109,14 @@ def analysis_options(f: Callable[..., Any]) -> Callable[..., Any]:
 @click.option('--debug', is_flag=True, help='디버그 모드 활성화')
 def cli(debug: bool):
     """Git Commit Manager - AI 기반 커밋 메시지 생성 및 코드 리뷰 도구"""
+    # 로깅 설정 초기화
+    Config.setup_logging()
+    
     if debug:
-        console.print("[dim]디버그 모드 활성화됨[/dim]")
+        # 디버그 플래그가 활성화되면 로그 레벨을 DEBUG로 강제 설정
+        import logging
+        logging.getLogger().setLevel(logging.DEBUG)
+        console.print("[dim]디버그 모드 활성화됨 (로그 레벨: DEBUG)[/dim]")
 
 
 def _check_and_suggest_ollama_model(model: Optional[str] = None) -> str:
