@@ -2,7 +2,7 @@
 
 import click
 import sys
-import os
+import os#sdfffsd
 from functools import wraps
 from pathlib import Path
 from typing import Optional, Callable, List, Dict, Any, Union
@@ -10,11 +10,11 @@ from rich.console import Console
 from rich.prompt import Prompt, Confirm
 from rich.table import Table
 from rich.panel import Panel
-from .git_analyzer import GitAnalyzer
-from .commit_analyzer import CommitAnalyzer
-from .llm_providers import get_provider, OllamaProvider, LLMProviderError
-from .watcher import GitWatcher
-from .config import Config
+from ..serviceImpl.git_analyzer import GitAnalyzer
+from ..serviceImpl.commit_analyzer import CommitAnalyzer
+from ..serviceImpl.llm_providers import get_provider, OllamaProvider, LLMProviderError
+from ..utils.watcher import GitWatcher
+from ..config.config import Config
 
 
 console = Console()

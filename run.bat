@@ -6,11 +6,18 @@ echo Git Commit Manager - Complete Setup
 echo =====================================
 echo.
 
-REM Check if already installed
+REM Check if already installed in the virtual environment
+if exist "%~dp0venv\Scripts\gcm.exe" (
+    call venv\Scripts\activate.bat
+    echo [INFO] Git Commit Manager is already installed in the virtual environment.
+    goto :run_options
+)
+
+REM Warn if a global installation exists (will not be used)
 where gcm >nul 2>&1
 if not errorlevel 1 (
-    echo [INFO] Git Commit Manager is already installed.
-    goto :run_options
+    echo [WARNING] A global installation of Git Commit Manager is detected.
+    echo Proceeding with setup in the virtual environment.
 )
 
 REM Python version check
@@ -93,7 +100,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM Ollama setup
+REM Ollama Setup (Optional)
 echo.
 echo =====================================
 echo Ollama Setup (Optional)
@@ -107,12 +114,13 @@ if errorlevel 1 (
     if /i "!INSTALL_OLLAMA!"=="y" (
         start https://ollama.ai
     )
-) else (
+)
+if not errorlevel 1 (
     echo [OK] Ollama is installed.
     echo.
     echo Current Ollama models:
     ollama list
-    
+
     REM Check for recommended model
     ollama list | findstr "gemma3:1b" >nul
     if errorlevel 1 (
@@ -123,11 +131,10 @@ if errorlevel 1 (
             ollama pull gemma3:1b
             if errorlevel 1 (
                 echo [WARNING] Failed to download model. You can try again later.
-            ) else (
-                echo [OK] gemma3:1b model installed successfully.
             )
         )
-    ) else (
+    )
+    if not errorlevel 1 (
         echo [OK] Recommended model gemma3:1b is already installed.
     )
 )
@@ -139,7 +146,7 @@ echo Environment Configuration
 echo =====================================
 if not exist .env (
     echo Creating .env configuration file...
-    copy .env.example .env >nul
+    copy env.example .env >nul
     echo [OK] .env file created from template.
     echo [INFO] Edit .env file to add your API keys if using OpenRouter or Gemini.
 ) else (

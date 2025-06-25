@@ -16,7 +16,7 @@ setup(
     install_requires=requirements,
     entry_points={
         "console_scripts": [
-            "gcm=git_commit_manager.cli:main",
+            "gcm=src.controller.cli:main",
         ],
     },
     long_description=long_description,

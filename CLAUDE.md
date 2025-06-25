@@ -14,13 +14,18 @@ Git Commit Manager는 AI 기반 Git 커밋 메시지 생성 및 코드 리뷰 �
 - **GitWatcher**: 실시간 파일 변경 감시 (watchdog 기반)
 - **CLI**: Click 기반 명령줄 인터페이스
 
-### 주요 모듈
+### 새로운 모듈 구조 (개선된 아키텍처)
 
-- `git_commit_manager/cli.py`: CLI 인터페이스 및 명령어 처리
-- `git_commit_manager/git_analyzer.py`: Git 변경사항 분석
-- `git_commit_manager/commit_analyzer.py`: AI 기반 커밋 메시지 생성
-- `git_commit_manager/llm_providers.py`: LLM 프로바이더 추상화
-- `git_commit_manager/watcher.py`: 실시간 파일 변경 감시
+- `src/config/`: 설정 파일 모듈
+- `src/controller/cli.py`: CLI 인터페이스 및 API 엔드포인트
+- `src/entity/`: DTO 및 엔티티 클래스
+- `src/service/`: 서비스 인터페이스 정의
+- `src/serviceImpl/`: 서비스 구현체 (Git 분석, 커밋 분석, LLM 프로바이더)
+- `src/utils/watcher.py`: 공통 유틸리티 (파일 감시)
+- `src/test/`: 테스트 케이스
+- `backup/`: 백업 파일
+- `logs/`: 로깅 디렉토리
+- `docs/`: 프로젝트 문서
 
 ## Development Commands
 

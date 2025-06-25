@@ -4,7 +4,7 @@ import os
 from typing import List, Dict, Tuple, Optional, Iterator
 from git import Repo, diff
 from pathlib import Path
-from .config import Config
+from ..config.config import Config
 
 
 class GitAnalyzer:

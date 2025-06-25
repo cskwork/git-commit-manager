@@ -14,12 +14,15 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
-from .git_analyzer import GitAnalyzer
-from .commit_analyzer import CommitAnalyzer
-from .config import Config
+from ..serviceImpl.git_analyzer import GitAnalyzer
+from ..serviceImpl.commit_analyzer import CommitAnalyzer
+from ..config.config import Config
 # dfsdfasdfsfdsdfsfdsfsdfsdf
 
 console = Console()
+
+# 전역 Progress 락 - 모든 Progress 인스턴스가 공유
+_global_progress_lock = threading.Lock()
 
 
 class PerformanceMonitor:
@@ -77,6 +80,8 @@ class GitChangeHandler(FileSystemEventHandler):
         self.processing_thread = None
         self.running = False
         self.performance = PerformanceMonitor()
+        self.is_processing = False  # 처리 중 상태 추적
+        self._processing_lock = threading.Lock()  # 동시 처리 방지용 락
         
     def start_processing(self):
         """변경사항 처리 스레드 시작"""
@@ -100,26 +105,37 @@ class GitChangeHandler(FileSystemEventHandler):
                 if item is None:  # 종료 신호
                     break
                     
-                # 디바운싱
-                time.sleep(self.debounce_seconds)
+                # 이미 처리 중인 경우 건너뛰기
+                with self._processing_lock:
+                    if self.is_processing:
+                        continue
+                    self.is_processing = True
                 
-                # 큐에 있는 중복 항목 제거
-                while not self.change_queue.empty():
-                    try:
-                        self.change_queue.get_nowait()
-                    except queue.Empty:
-                        break
-                
-                # 변경사항 처리
-                if self.on_change_callback:
-                    start_time = time.time()
-                    try:
-                        self.on_change_callback()
-                        duration = time.time() - start_time
-                        self.performance.record_analysis(duration)
-                    except Exception as e:
-                        console.print(f"[red]오류 발생: {e}[/red]")
-                        self.performance.record_error()
+                try:
+                    # 디바운싱
+                    time.sleep(self.debounce_seconds)
+                    
+                    # 큐에 있는 중복 항목 제거
+                    while not self.change_queue.empty():
+                        try:
+                            self.change_queue.get_nowait()
+                        except queue.Empty:
+                            break
+                    
+                    # 변경사항 처리
+                    if self.on_change_callback:
+                        start_time = time.time()
+                        try:
+                            self.on_change_callback()
+                            duration = time.time() - start_time
+                            self.performance.record_analysis(duration)
+                        except Exception as e:
+                            console.print(f"[red]오류 발생: {e}[/red]")
+                            self.performance.record_error()
+                finally:
+                    # 처리 완료 후 상태 해제
+                    with self._processing_lock:
+                        self.is_processing = False
                         
             except queue.Empty:
                 continue
@@ -193,95 +209,133 @@ class GitWatcher:
         self.watching = False
         self.last_analysis_time = None
         self.analysis_count = 0
+        self._is_analyzing = False  # 분석 중 상태 추적
+        self._analysis_lock = threading.Lock()  # 동시 분석 방지용 락
         
     def on_changes_detected(self):
         """변경사항이 감지되었을 때 실행"""
-        self.analysis_count += 1
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        
-        console.print(f"\n[yellow]변경사항 감지됨! [{timestamp}][/yellow]")
-        
-        # 변경사항 해시 확인
-        current_hash = self.handler._get_changes_hash()
-        if current_hash == self.handler.last_processed_hash:
-            console.print("[dim]이미 처리된 변경사항입니다.[/dim]")
-            console.print(f"[dim]현재 해시: {current_hash[:8]}...[/dim]")
-            return
-            
-        console.print(f"[dim]새로운 변경사항 감지됨 (해시: {current_hash[:8]}...)[/dim]")
+        # 이미 분석 중인 경우 건너뛰기
+        with self._analysis_lock:
+            if self._is_analyzing:
+                console.print("[dim]이미 분석이 진행 중입니다. 건너뜁니다.[/dim]")
+                return
+            self._is_analyzing = True
         
         try:
-            # Progress spinner로 분석 상태 표시
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                TimeElapsedColumn(),
-                console=console
-            ) as progress:
-                # 변경사항 분석
-                analyze_task = progress.add_task("[cyan]변경사항 분석 중...", total=None)
+            self.analysis_count += 1
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            
+            console.print(f"\n[yellow]변경사항 감지됨! [{timestamp}][/yellow]")
+            
+            # 변경사항 해시 확인
+            current_hash = self.handler._get_changes_hash()
+            if current_hash == self.handler.last_processed_hash:
+                console.print("[dim]이미 처리된 변경사항입니다.[/dim]")
+                console.print(f"[dim]현재 해시: {current_hash[:8]}...[/dim]")
+                return
                 
-                changes = self.git.get_all_changes()
-                if not any(changes.values()):
-                    console.print("[dim]변경사항이 없습니다.[/dim]")
-                    return
-                
-                # 변경사항 표시
-                self._display_changes(changes)
-                
-                # 커밋 메시지 생성
-                progress.update(analyze_task, description="[cyan]커밋 메시지 생성 중...")
-                
-                chunks = self.git.get_diff_chunks()
-                if not chunks:
-                    console.print("[yellow]분석할 변경사항이 없습니다.[/yellow]")
-                    return
-                    
-                commit_message = self.commit_analyzer.generate_commit_message(chunks)
-                
-                # 결과 표시
-                console.print(Panel(
-                    commit_message,
-                    title="[bold green]추천 커밋 메시지[/bold green]",
-                    border_style="green",
-                    padding=(1, 2)
-                ))
-                
-                # 코드 리뷰 실행
-                should_review = Config.AUTO_CODE_REVIEW
-                
-                if not Config.AUTO_CODE_REVIEW:
-                    # Progress를 일시 중지하고 사용자에게 코드 리뷰 실행 여부 묻기
-                    progress.stop()
-                    try:
-                        user_input = input("\n코드 리뷰를 실행하시겠습니까? (y/N): ").strip().lower()
-                        should_review = user_input in ['y', 'yes', 'ㅇ']
-                    except (EOFError, KeyboardInterrupt):
-                        should_review = False
-                        console.print("\n[yellow]코드 리뷰가 취소되었습니다.[/yellow]")
-                
-                if should_review:
-                    # Progress 재시작
+            console.print(f"[dim]새로운 변경사항 감지됨 (해시: {current_hash[:8]}...)[/dim]")
+            
+            # 변경사항 분석
+            changes = self.git.get_all_changes()
+            if not any(changes.values()):
+                console.print("[dim]변경사항이 없습니다.[/dim]")
+                return
+            
+            # 변경사항 표시
+            self._display_changes(changes)
+            
+            # Progress를 사용하여 커밋 메시지 생성
+            progress = None
+            try:
+                # 전역 Progress 락 획득
+                with _global_progress_lock:
+                    progress = Progress(
+                        SpinnerColumn(),
+                        TextColumn("[progress.description]{task.description}"),
+                        TimeElapsedColumn(),
+                        console=console,
+                        transient=True  # 일시적인 디스플레이로 설정
+                    )
                     progress.start()
-                    progress.update(analyze_task, description="[cyan]코드 리뷰 실행 중...")
                     
-                    reviews = self.commit_analyzer.review_code_changes(chunks)
+                    # 커밋 메시지 생성
+                    analyze_task = progress.add_task("[cyan]커밋 메시지 생성 중...", total=None)
                     
-                    if reviews:
-                        console.print(f"\n[bold blue]코드 리뷰 결과 ({len(reviews)}개 파일)[/bold blue]")
-                        for i, review in enumerate(reviews, 1):
-                            console.print(Panel(
-                                f"[yellow]파일:[/yellow] {review['file']}\n"
-                                f"[yellow]변경:[/yellow] {review['type']}\n\n"
-                                f"{review['review']}",
-                                title=f"[bold blue]리뷰 {i}/{len(reviews)}[/bold blue]",
-                                border_style="blue",
-                                padding=(1, 2)
-                            ))
+                    chunks = self.git.get_diff_chunks()
+                    if not chunks:
+                        progress.stop()
+                        console.print("[yellow]분석할 변경사항이 없습니다.[/yellow]")
+                        return
+                        
+                    commit_message = self.commit_analyzer.generate_commit_message(chunks)
+                    
+                    # Progress 중지 (결과 표시 전에)
+                    progress.stop()
+                    progress = None
+                    
+                    # 결과 표시
+                    console.print(Panel(
+                        commit_message,
+                        title="[bold green]추천 커밋 메시지[/bold green]",
+                        border_style="green",
+                        padding=(1, 2)
+                    ))
+                    
+                    # 코드 리뷰 실행 여부 확인
+                    should_review = Config.AUTO_CODE_REVIEW
+                    
+                    if not Config.AUTO_CODE_REVIEW:
+                        try:
+                            user_input = input("\n코드 리뷰를 실행하시겠습니까? (y/N): ").strip().lower()
+                            should_review = user_input in ['y', 'yes', 'ㅇ']
+                        except (EOFError, KeyboardInterrupt):
+                            should_review = False
+                            console.print("\n[yellow]코드 리뷰가 취소되었습니다.[/yellow]")
+                    
+                    if should_review:
+                        # 새로운 Progress 인스턴스 생성
+                        with _global_progress_lock:
+                            progress = Progress(
+                                SpinnerColumn(),
+                                TextColumn("[progress.description]{task.description}"),
+                                TimeElapsedColumn(),
+                                console=console,
+                                transient=True
+                            )
+                            progress.start()
+                            
+                            review_task = progress.add_task("[cyan]코드 리뷰 실행 중...", total=None)
+                            
+                            reviews = self.commit_analyzer.review_code_changes(chunks)
+                            
+                            # Progress 중지
+                            progress.stop()
+                            progress = None
+                            
+                            if reviews:
+                                console.print(f"\n[bold blue]코드 리뷰 결과 ({len(reviews)}개 파일)[/bold blue]")
+                                for i, review in enumerate(reviews, 1):
+                                    console.print(Panel(
+                                        f"[yellow]파일:[/yellow] {review['file']}\n"
+                                        f"[yellow]변경:[/yellow] {review['type']}\n\n"
+                                        f"{review['review']}",
+                                        title=f"[bold blue]리뷰 {i}/{len(reviews)}[/bold blue]",
+                                        border_style="blue",
+                                        padding=(1, 2)
+                                    ))
+                            else:
+                                console.print("\n[green]✓ 코드가 깔끔합니다! 리뷰할 내용이 없습니다.[/green]")
                     else:
-                        console.print("\n[green]✓ 코드가 깔끔합니다! 리뷰할 내용이 없습니다.[/green]")
-                else:
-                    console.print("\n[dim]코드 리뷰를 건너뜁니다.[/dim]")
+                        console.print("\n[dim]코드 리뷰를 건너뜁니다.[/dim]")
+            
+            finally:
+                # Progress가 아직 실행 중이면 중지
+                if progress is not None:
+                    try:
+                        progress.stop()
+                    except Exception:
+                        pass
             
             # 성공적으로 처리된 해시 저장
             self.handler.last_processed_hash = current_hash
@@ -297,7 +351,11 @@ class GitWatcher:
             # 스택 트레이스 표시 (디버깅용)
             import traceback
             console.print(f"[dim]{traceback.format_exc()}[/dim]")
-            
+        finally:
+            # 분석 상태 해제
+            with self._analysis_lock:
+                self._is_analyzing = False
+        
     def _display_changes(self, changes: dict):
         """변경사항을 보기 좋게 표시"""
         change_text = []

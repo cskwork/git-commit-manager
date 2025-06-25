@@ -8,7 +8,7 @@ from typing import List, Dict, Optional, Tuple
 from pathlib import Path
 from .llm_providers import LLMProvider
 from .git_analyzer import GitAnalyzer
-from .config import Config
+from ..config.config import Config
 
 
 class CacheManager:
