@@ -17,7 +17,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from .git_analyzer import GitAnalyzer
 from .commit_analyzer import CommitAnalyzer
 from .config import Config
-
+# dfsdfasdfsfdsdfsfdsfsdfsdf
 
 console = Console()
 
@@ -133,15 +133,39 @@ class GitChangeHandler(FileSystemEventHandler):
         return any(pattern in path_str for pattern in self._ignored_patterns)
     
     def _get_changes_hash(self) -> str:
-        """현재 변경사항의 해시값 생성"""
+        """현재 변경사항의 해시값 생성 (SHA-256 사용, 파일 크기 및 수정 시간 포함)"""
         try:
             changes = self.git.get_all_changes()
-            # 변경사항을 문자열로 변환하여 해시 생성
-            changes_str = str(sorted(changes.items()))
-            return hashlib.md5(changes_str.encode()).hexdigest()
+            
+            # 파일 크기와 수정 시간 정보 추가
+            enhanced_changes = {}
+            for change_type, files in changes.items():
+                if change_type in ['modified', 'added', 'untracked']:
+                    file_info = []
+                    for file_path in files:
+                        try:
+                            full_path = Path(self.git.repo_path) / file_path
+                            if full_path.exists():
+                                stat = full_path.stat()
+                                file_info.append({
+                                    'path': file_path,
+                                    'size': stat.st_size,
+                                    'mtime': stat.st_mtime
+                                })
+                            else:
+                                file_info.append({'path': file_path, 'size': 0, 'mtime': 0})
+                        except Exception:
+                            file_info.append({'path': file_path, 'size': 0, 'mtime': 0})
+                    enhanced_changes[change_type] = file_info
+                else:
+                    enhanced_changes[change_type] = files
+            
+            # 변경사항과 파일 정보를 문자열로 변환하여 해시 생성
+            changes_str = str(sorted(enhanced_changes.items()))
+            return hashlib.sha256(changes_str.encode()).hexdigest()
         except Exception:
             # Git 상태를 읽을 수 없는 경우 현재 시간 기반 해시 반환
-            return hashlib.md5(str(time.time()).encode()).hexdigest()
+            return hashlib.sha256(str(time.time()).encode()).hexdigest()
         
     def on_any_event(self, event: FileSystemEvent):
         """모든 파일 시스템 이벤트 처리"""
@@ -181,7 +205,10 @@ class GitWatcher:
         current_hash = self.handler._get_changes_hash()
         if current_hash == self.handler.last_processed_hash:
             console.print("[dim]이미 처리된 변경사항입니다.[/dim]")
+            console.print(f"[dim]현재 해시: {current_hash[:8]}...[/dim]")
             return
+            
+        console.print(f"[dim]새로운 변경사항 감지됨 (해시: {current_hash[:8]}...)[/dim]")
         
         try:
             # Progress spinner로 분석 상태 표시
@@ -220,8 +247,22 @@ class GitWatcher:
                     padding=(1, 2)
                 ))
                 
-                # 자동 코드 리뷰
-                if Config.AUTO_CODE_REVIEW:
+                # 코드 리뷰 실행
+                should_review = Config.AUTO_CODE_REVIEW
+                
+                if not Config.AUTO_CODE_REVIEW:
+                    # Progress를 일시 중지하고 사용자에게 코드 리뷰 실행 여부 묻기
+                    progress.stop()
+                    try:
+                        user_input = input("\n코드 리뷰를 실행하시겠습니까? (y/N): ").strip().lower()
+                        should_review = user_input in ['y', 'yes', 'ㅇ']
+                    except (EOFError, KeyboardInterrupt):
+                        should_review = False
+                        console.print("\n[yellow]코드 리뷰가 취소되었습니다.[/yellow]")
+                
+                if should_review:
+                    # Progress 재시작
+                    progress.start()
                     progress.update(analyze_task, description="[cyan]코드 리뷰 실행 중...")
                     
                     reviews = self.commit_analyzer.review_code_changes(chunks)
@@ -240,7 +281,7 @@ class GitWatcher:
                     else:
                         console.print("\n[green]✓ 코드가 깔끔합니다! 리뷰할 내용이 없습니다.[/green]")
                 else:
-                    console.print("\n[dim]자동 코드 리뷰가 비활성화되어 있습니다.[/dim]")
+                    console.print("\n[dim]코드 리뷰를 건너뜁니다.[/dim]")
             
             # 성공적으로 처리된 해시 저장
             self.handler.last_processed_hash = current_hash
@@ -322,6 +363,9 @@ class GitWatcher:
             console.print("[yellow]이미 감시 중입니다.[/yellow]")
             return
         
+        # 이전 해시 초기화 (새로운 변경사항 감지를 위해)
+        self.handler.last_processed_hash = None
+        
         # 처리 스레드 시작
         self.handler.start_processing()
         
@@ -343,6 +387,17 @@ class GitWatcher:
             border_style="green",
             padding=(1, 2)
         ))
+        
+        # 시작 시 현재 변경사항 확인
+        console.print("\n[dim]현재 변경사항 확인 중...[/dim]")
+        current_changes = self.git.get_all_changes()
+        if any(current_changes.values()):
+            console.print("[yellow]기존 변경사항이 감지되었습니다. 분석을 시작합니다.[/yellow]")
+            # 약간의 지연 후 분석 실행
+            time.sleep(1)
+            self.on_changes_detected()
+        else:
+            console.print("[dim]현재 변경사항이 없습니다.[/dim]")
         
         try:
             while True:

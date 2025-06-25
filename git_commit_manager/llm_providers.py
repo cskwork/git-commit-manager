@@ -3,6 +3,8 @@
 import os
 import json
 import time
+import signal
+import threading
 from abc import ABC, abstractmethod
 from typing import List, Dict, Optional, Any
 import requests
@@ -16,6 +18,40 @@ except ImportError:
 from dotenv import load_dotenv
 
 load_dotenv()
+
+
+class TimeoutError(Exception):
+    """타임아웃 예외"""
+    pass
+
+
+def with_timeout(timeout_seconds: int):
+    """타임아웃 데코레이터"""
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            result = [None]
+            exception = [None]
+            
+            def target():
+                try:
+                    result[0] = func(*args, **kwargs)
+                except Exception as e:
+                    exception[0] = e
+            
+            thread = threading.Thread(target=target, daemon=True)
+            thread.start()
+            thread.join(timeout=timeout_seconds)
+            
+            if thread.is_alive():
+                # 스레드가 아직 실행 중이면 타임아웃
+                raise TimeoutError(f"LLM 요청이 {timeout_seconds}초 후 타임아웃되었습니다")
+            
+            if exception[0]:
+                raise exception[0]
+            
+            return result[0]
+        return wrapper
+    return decorator
 
 
 class LLMProviderError(Exception):
@@ -40,6 +76,7 @@ class LLMProvider(ABC):
         """프롬프트에 대한 응답 생성 구현"""
         pass
     
+    @with_timeout(60)  # 60초 타임아웃
     def generate(self, prompt: str, system_prompt: Optional[str] = None) -> str:
         """프롬프트에 대한 응답 생성 (재시도 로직 포함)"""
         last_error = None
@@ -52,6 +89,8 @@ class LLMProvider(ABC):
                 if attempt < self.max_retries - 1:
                     time.sleep(self.retry_delay * (attempt + 1))
                 continue
+            except TimeoutError:
+                raise LLMProviderError("LLM 요청이 타임아웃되었습니다. 네트워크 연결이나 모델 상태를 확인해주세요.")
             except LLMProviderError:
                 raise
             except Exception as e:
@@ -171,16 +210,30 @@ class OpenRouterProvider(LLMProvider):
     
     def __init__(self, model_name: str = "openai/gpt-3.5-turbo", max_retries: int = 3):
         super().__init__(max_retries=max_retries)
-        self.api_key = os.getenv("OPENROUTER_API_KEY")
+        from .config import Config
+        self.api_key = Config.OPENROUTER_API_KEY
         if not self.api_key:
-            raise LLMProviderError("OpenRouter API 키가 설정되지 않았습니다. .env 파일이나 환경변수를 확인해주세요.")
+            raise LLMProviderError(
+                "OpenRouter API 키가 설정되지 않았거나 유효하지 않습니다. "
+                ".env 파일을 확인하고 OPENROUTER_API_KEY를 올바른 형식으로 설정해주세요."
+            )
         self.model_name = model_name
         self.base_url = "https://openrouter.ai/api/v1/chat/completions"
         
     def _generate_impl(self, prompt: str, system_prompt: Optional[str] = None) -> str:
+        # 입력 검증
+        if not prompt or not isinstance(prompt, str):
+            raise LLMProviderError("유효하지 않은 프롬프트")
+            
+        # 프롬프트 길이 제한
+        max_prompt_length = 50000  # 약 50KB
+        if len(prompt) > max_prompt_length:
+            raise LLMProviderError(f"프롬프트가 너무 깁니다 ({len(prompt)} > {max_prompt_length})")
+            
         headers = {
             "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "User-Agent": "GitCommitManager/1.0"
         }
         
         messages = []
@@ -200,7 +253,10 @@ class OpenRouterProvider(LLMProvider):
                 self.base_url, 
                 headers=headers, 
                 json=data,
-                timeout=30
+                timeout=30,
+                # 보안 옵션
+                verify=True,  # SSL 인증서 검증
+                allow_redirects=False  # 리다이렉트 방지
             )
             
             if response.status_code == 429:
@@ -233,9 +289,13 @@ class GeminiProvider(LLMProvider):
         if not GEMINI_AVAILABLE:
             raise LLMProviderError("google-generativeai 패키지가 설치되지 않았습니다. pip install google-generativeai를 실행하세요.")
             
-        self.api_key = os.getenv("GEMINI_API_KEY")
+        from .config import Config
+        self.api_key = Config.GEMINI_API_KEY
         if not self.api_key:
-            raise LLMProviderError("Gemini API 키가 설정되지 않았습니다. .env 파일이나 환경변수를 확인해주세요.")
+            raise LLMProviderError(
+                "Gemini API 키가 설정되지 않았거나 유효하지 않습니다. "
+                ".env 파일을 확인하고 GEMINI_API_KEY를 올바른 형식으로 설정해주세요."
+            )
 
         try:
             genai.configure(api_key=self.api_key)
@@ -251,6 +311,15 @@ class GeminiProvider(LLMProvider):
 
     def _generate_impl(self, prompt: str, system_prompt: Optional[str] = None) -> str:
         try:
+            # 입력 검증
+            if not prompt or not isinstance(prompt, str):
+                raise LLMProviderError("유효하지 않은 프롬프트")
+                
+            # 프롬프트 길이 제한
+            max_prompt_length = 30000  # Gemini의 상대적으로 작은 컨텍스트 창
+            if len(prompt) > max_prompt_length:
+                raise LLMProviderError(f"프롬프트가 너무 깁니다 ({len(prompt)} > {max_prompt_length})")
+            
             full_prompt = prompt
             if system_prompt:
                 full_prompt = f"{system_prompt}\n\n{prompt}"

@@ -148,11 +148,33 @@ class GitAnalyzer:
         return chunks
 
     def _process_untracked_file(self, file_path: str, max_chunk_size: int) -> List[Dict[str, str]]:
-        """추적되지 않은 파일 처리"""
+        """추적되지 않은 파일 처리 (보안 강화 및 메모리 최적화)"""
         chunks = []
         
         try:
+            # 파일 경로 보안 검증
+            if not Config.validate_file_path(file_path, str(self.repo_path)):
+                return [{
+                    'type': 'untracked',
+                    'path': file_path,
+                    'diff': "보안상 처리할 수 없는 파일 경로",
+                    'security_blocked': True
+                }]
+            
             full_path = self.repo_path / file_path
+            
+            # 파일 존재 여부 및 크기 확인
+            if not full_path.exists() or not full_path.is_file():
+                return []
+                
+            file_size = full_path.stat().st_size
+            if file_size > self.max_file_size:
+                return [{
+                    'type': 'untracked',
+                    'path': file_path,
+                    'diff': f"파일이 너무 큽니다 ({file_size // (1024*1024)}MB > {self.max_file_size // (1024*1024)}MB)",
+                    'size_exceeded': True
+                }]
             
             # 바이너리 파일 확인
             if self._is_binary_file(full_path):
@@ -164,43 +186,81 @@ class GitAnalyzer:
                 })
                 return chunks
             
-            # 텍스트 파일 처리 (스트리밍)
-            with full_path.open('r', encoding='utf-8', errors='ignore') as f:
-                content_lines = []
-                current_size = 0
-                
-                for line in f:
-                    line_with_prefix = f"+{line}"
-                    line_size = len(line_with_prefix)
+            # 텍스트 파일 처리 (메모리 효율적 스트리밍)
+            return self._process_file_streaming(full_path, file_path, max_chunk_size)
                     
-                    if current_size + line_size > max_chunk_size and content_lines:
-                        # 현재 청크 저장
-                        chunks.append({
-                            'type': 'untracked',
-                            'path': file_path,
-                            'diff': ''.join(content_lines)
-                        })
-                        content_lines = []
-                        current_size = 0
-                    
-                    content_lines.append(line_with_prefix)
-                    current_size += line_size
-                
-                # 마지막 청크 저장
-                if content_lines:
-                    chunks.append({
-                        'type': 'untracked',
-                        'path': file_path,
-                        'diff': ''.join(content_lines)
-                    })
-                    
-        except Exception:
+        except (OSError, IOError, PermissionError) as e:
             chunks.append({
                 'type': 'untracked',
                 'path': file_path,
-                'diff': "새 파일 (내용을 읽을 수 없음)"
+                'diff': f"파일 읽기 오류: {type(e).__name__}"
+            })
+        except Exception as e:
+            import logging
+            logging.error(f"Unexpected error processing {file_path}: {e}")
+            chunks.append({
+                'type': 'untracked',
+                'path': file_path,
+                'diff': "파일 처리 중 오류 발생"
             })
             
+        return chunks
+    
+    def _process_file_streaming(self, full_path: Path, file_path: str, max_chunk_size: int) -> List[Dict[str, str]]:
+        """메모리 효율적인 파일 스트리밍 처리"""
+        chunks = []
+        
+        with full_path.open('r', encoding='utf-8', errors='ignore') as f:
+            chunk_buffer = []
+            current_size = 0
+            line_count = 0
+            
+            for line in f:
+                line_count += 1
+                line_with_prefix = f"+{line}"
+                line_size = len(line_with_prefix)
+                
+                # 청크 크기 제한 확인
+                if current_size + line_size > max_chunk_size and chunk_buffer:
+                    # 현재 청크 저장
+                    chunks.append({
+                        'type': 'untracked',
+                        'path': file_path,
+                        'diff': ''.join(chunk_buffer),
+                        'chunk_info': f"라인 {line_count - len(chunk_buffer)}-{line_count - 1}"
+                    })
+                    chunk_buffer.clear()
+                    current_size = 0
+                
+                chunk_buffer.append(line_with_prefix)
+                current_size += line_size
+                
+                # 매우 긴 라인 처리
+                if line_size > max_chunk_size:
+                    # 긴 라인을 별도 청크로 분리
+                    if len(chunk_buffer) > 1:
+                        # 이전 라인들을 먼저 저장
+                        chunk_buffer.pop()  # 긴 라인 제거
+                        chunks.append({
+                            'type': 'untracked',
+                            'path': file_path,
+                            'diff': ''.join(chunk_buffer)
+                        })
+                        chunk_buffer = [line_with_prefix]  # 긴 라인만 남김
+                
+                # 라인 수 제한 (DOS 방지)
+                if line_count > 10000:
+                    chunk_buffer.append("\n... (파일이 너무 깁니다. 처음 10000라인만 표시)")
+                    break
+            
+            # 마지막 청크 저장
+            if chunk_buffer:
+                chunks.append({
+                    'type': 'untracked',
+                    'path': file_path,
+                    'diff': ''.join(chunk_buffer)
+                })
+        
         return chunks
 
     def _is_binary_file(self, file_path: Path) -> bool:
@@ -345,12 +405,21 @@ class GitAnalyzer:
             return "커밋 없음"
             
     def get_file_content_stream(self, file_path: str) -> Iterator[str]:
-        """파일 내용을 스트림으로 반환 (메모리 효율적)"""
-        full_path = self.repo_path / file_path
-        
-        if not full_path.exists():
+        """파일 내용을 스트림으로 반환 (메모리 효율적, 보안 강화)"""
+        # 파일 경로 보안 검증
+        if not Config.validate_file_path(file_path, str(self.repo_path)):
             return
             
-        with full_path.open('r', encoding='utf-8', errors='ignore') as f:
-            for line in f:
-                yield line 
+        full_path = self.repo_path / file_path
+        
+        if not full_path.exists() or not full_path.is_file():
+            return
+            
+        try:
+            with full_path.open('r', encoding='utf-8', errors='ignore') as f:
+                for line_num, line in enumerate(f, 1):
+                    if line_num > 10000:  # DOS 방지
+                        break
+                    yield line
+        except (OSError, IOError, PermissionError):
+            return  # 파일 읽기 오류시 빈 이터레이터 반환 

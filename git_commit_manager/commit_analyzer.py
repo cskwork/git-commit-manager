@@ -20,8 +20,8 @@ class CacheManager:
         self.ttl = Config.CACHE_TTL_SECONDS
     
     def _get_cache_key(self, prefix: str, content: str) -> str:
-        """캐시 키 생성"""
-        content_hash = hashlib.md5(content.encode()).hexdigest()
+        """캐시 키 생성 (SHA-256 사용)"""
+        content_hash = hashlib.sha256(content.encode()).hexdigest()
         return f"{prefix}_{content_hash}"
     
     def get(self, prefix: str, content: str) -> Optional[str]:
@@ -178,7 +178,7 @@ Generate a code review for the change above."""
         }
     
     @classmethod
-    def get_commit_user_prompts(cls) -> Dict[str, str]:te
+    def get_commit_user_prompts(cls) -> Dict[str, str]:
         """환경변수 또는 기본값에서 커밋 사용자 프롬프트 가져오기"""
         return {
             "korean": Config.CUSTOM_COMMIT_USER_PROMPT_KOREAN or cls.DEFAULT_COMMIT_USER_PROMPTS["korean"],
@@ -367,25 +367,43 @@ class CommitAnalyzer:
         }
     
     def _extract_important_diff(self, diff: str, max_size: int) -> str:
-        """중요한 diff 부분만 추출"""
+        """중요한 diff 부분만 추출 (보안 및 성능 개선)"""
+        if not diff or max_size <= 0:
+            return ""
+            
         lines = diff.split('\n')
         important_lines = []
         current_size = 0
         
-        # 추가/삭제된 라인 우선 포함
+        # 추가/삭제된 라인 우선 포함 (보안 검사 포함)
         for line in lines:
+            # 민감한 정보가 포함된 라인 필터링 (확장된 패턴)
+            sensitive_patterns = [
+                'password', 'passwd', 'pwd', 'api_key', 'apikey', 'token', 'secret', 
+                'key', 'auth', 'credential', 'private', 'session', 'jwt', 'bearer',
+                'access_token', 'refresh_token', 'client_secret', 'client_id'
+            ]
+            if any(sensitive in line.lower() for sensitive in sensitive_patterns):
+                line = "... (민감한 정보가 포함된 라인 제외됨)"
+            
             if line.startswith(('+', '-')) and not line.startswith(('+++', '---')):
                 if current_size + len(line) > max_size:
                     break
                 important_lines.append(line)
                 current_size += len(line) + 1
+                
+                # 라인 수 제한 (DOS 방지)
+                if len(important_lines) > 100:
+                    important_lines.append("... (너무 많은 변경사항으로 일부 생략)")
+                    break
         
         # 컨텍스트 라인 추가
         remaining_size = max_size - current_size
-        context_lines = [l for l in lines if not l.startswith(('+', '-'))]
-        
-        for line in context_lines[:remaining_size // 50]:  # 평균 라인 길이 50 가정
-            important_lines.append(line)
+        if remaining_size > 0:
+            context_lines = [l for l in lines if not l.startswith(('+', '-'))]
+            
+            for line in context_lines[:min(10, remaining_size // 50)]:  # 최대 10라인, 평균 라인 길이 50 가정
+                important_lines.append(line)
             
         return '\n'.join(important_lines)
     

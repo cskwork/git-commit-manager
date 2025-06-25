@@ -5,7 +5,7 @@ import sys
 import os
 from functools import wraps
 from pathlib import Path
-from typing import Optional, Callable, List
+from typing import Optional, Callable, List, Dict, Any, Union
 from rich.console import Console
 from rich.prompt import Prompt, Confirm
 from rich.table import Table
@@ -31,7 +31,8 @@ def handle_errors(f: Callable) -> Callable:
             console.print("[yellow]팁: API 키나 모델 설정을 확인해주세요.[/yellow]")
             sys.exit(1)
         except ValueError as e:
-            console.print(f"[red]오류: {e}[/red]")
+            console.print(f"[red]설정 오류: {e}[/red]")
+            console.print("[yellow]팁: 저장소 경로와 설정을 확인해주세요.[/yellow]")
             sys.exit(1)
         except KeyboardInterrupt:
             console.print("\n[yellow]작업이 취소되었습니다.[/yellow]")
@@ -40,12 +41,23 @@ def handle_errors(f: Callable) -> Callable:
             console.print(f"[red]예상치 못한 오류: {e}[/red]")
             if "--debug" in sys.argv:
                 import traceback
-                console.print(f"[dim]{traceback.format_exc()}[/dim]")
+                # 민감한 정보 필터링
+                filtered_trace = traceback.format_exc()
+                # API 키나 민감한 정보가 포함될 수 있는 줄 제거 (확장된 패턴)
+                sensitive_patterns = [
+                    'api_key', 'apikey', 'token', 'password', 'passwd', 'pwd', 'secret',
+                    'key', 'auth', 'credential', 'private', 'session', 'jwt', 'bearer'
+                ]
+                filtered_lines = []
+                for line in filtered_trace.split('\n'):
+                    if not any(sensitive in line.lower() for sensitive in sensitive_patterns):
+                        filtered_lines.append(line)
+                console.print(f"[dim]{''.join(filtered_lines)}[/dim]")
             sys.exit(1)
     return wrapper
 
 
-def _initialize_analysis(ctx: click.Context, provider: Optional[str], model: Optional[str], repo: str):
+def _initialize_analysis(ctx: click.Context, provider: Optional[str], model: Optional[str], repo: str) -> None:
     """Helper to initialize GitAnalyzer, LLM provider, and CommitAnalyzer."""
     try:
         if provider is None:
@@ -76,7 +88,7 @@ def _initialize_analysis(ctx: click.Context, provider: Optional[str], model: Opt
         raise click.ClickException(f"초기화 오류: {e}")
 
 
-def analysis_options(f: Callable) -> Callable:
+def analysis_options(f: Callable[..., Any]) -> Callable[..., Any]:
     """Decorator for common analysis command options."""
     @click.option('--provider', '-p', type=click.Choice(['ollama', 'openrouter', 'gemini']), 
                   help='사용할 LLM 프로바이더 (기본값: .env의 DEFAULT_PROVIDER)')
@@ -400,7 +412,7 @@ def config():
     console.print(settings_table)
 
 
-def _display_changes_table(changes: dict):
+def _display_changes_table(changes: Dict[str, List[Union[str, tuple]]]) -> None:
     """변경사항을 테이블로 표시"""
     table = Table(title="감지된 변경사항", show_header=True, header_style="bold")
     table.add_column("상태", style="cyan", width=10)

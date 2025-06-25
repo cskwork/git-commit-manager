@@ -1,10 +1,12 @@
 """설정 관리 모듈"""
 
 import os
+import re
 from typing import Optional, Dict, Any
 from dotenv import load_dotenv
 import json
 from pathlib import Path
+import logging
 
 load_dotenv()
 
@@ -12,9 +14,49 @@ load_dotenv()
 class Config:
     """애플리케이션 설정"""
     
-    # API 키
-    OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+    # API 키 (검증된 형태로 저장)
+    OPENROUTER_API_KEY = None
+    GEMINI_API_KEY = None
+    
+    @classmethod
+    def _validate_api_key(cls, key: Optional[str], provider: str) -> Optional[str]:
+        """API 키 유효성 검사"""
+        if not key:
+            return None
+            
+        # 기본 보안 검사
+        if len(key) < 10:
+            logging.warning(f"API key for {provider} seems too short")
+            return None
+            
+        # 특수문자 확인 (안전한 API 키 패턴 - 경로 순회 공격 방지)
+        if not re.match(r'^[A-Za-z0-9\-_.+=]+$', key):
+            logging.warning(f"API key for {provider} contains invalid characters")
+            return None
+            
+        # 프로바이더별 형식 검증
+        if provider == "openrouter" and not key.startswith(("sk-or-", "sk-")):
+            logging.warning(f"OpenRouter API key format may be invalid")
+            
+        if provider == "gemini" and len(key) < 35:
+            logging.warning(f"Gemini API key format may be invalid")
+            
+        return key
+    
+    @classmethod
+    def _initialize_api_keys(cls):
+        """API 키 초기화 및 검증"""
+        raw_openrouter_key = os.getenv("OPENROUTER_API_KEY")
+        raw_gemini_key = os.getenv("GEMINI_API_KEY")
+        
+        cls.OPENROUTER_API_KEY = cls._validate_api_key(raw_openrouter_key, "openrouter")
+        cls.GEMINI_API_KEY = cls._validate_api_key(raw_gemini_key, "gemini")
+        
+        # 검증 결과 로깅 (키 값은 로깅하지 않음)
+        if raw_openrouter_key and not cls.OPENROUTER_API_KEY:
+            logging.error("OpenRouter API key validation failed")
+        if raw_gemini_key and not cls.GEMINI_API_KEY:
+            logging.error("Gemini API key validation failed")
     
     # LLM 프로바이더 및 모델 설정
     DEFAULT_PROVIDER = os.getenv("DEFAULT_PROVIDER", "ollama")
@@ -27,7 +69,7 @@ class Config:
     COMMIT_MESSAGE_LANGUAGE = os.getenv("COMMIT_MESSAGE_LANGUAGE", "korean")
     
     # 코드 리뷰 자동 실행 여부
-    AUTO_CODE_REVIEW = os.getenv("AUTO_CODE_REVIEW", "true").lower() == "true"
+    AUTO_CODE_REVIEW = os.getenv("AUTO_CODE_REVIEW", "false").lower() == "true"
     
     # 캐싱 설정
     ENABLE_CACHE = os.getenv("ENABLE_CACHE", "true").lower() == "true"
@@ -99,6 +141,7 @@ class Config:
     def load_config(cls, filepath: str = ".gcm_config.json"):
         """파일에서 설정 로드"""
         if not os.path.exists(filepath):
+            cls._initialize_api_keys()  # API 키 검증 실행
             return
             
         with open(filepath, 'r', encoding='utf-8') as f:
@@ -109,4 +152,31 @@ class Config:
                 # CACHE_DIR은 Path 객체로 변환
                 if key == 'CACHE_DIR':
                     value = Path(value)
+                # API 키는 별도 검증 과정을 거침
+                elif key in ['OPENROUTER_API_KEY', 'GEMINI_API_KEY']:
+                    continue
                 setattr(cls, key, value)
+                
+        cls._initialize_api_keys()  # API 키 검증 실행
+    
+    @classmethod
+    def validate_file_path(cls, file_path: str, repo_path: str) -> bool:
+        """파일 경로 보안 검증"""
+        try:
+            # 절대 경로로 변환
+            abs_file_path = os.path.abspath(os.path.join(repo_path, file_path))
+            abs_repo_path = os.path.abspath(repo_path)
+            
+            # 경로 순회 공격 방지
+            if not abs_file_path.startswith(abs_repo_path):
+                logging.warning(f"Path traversal attempt detected: {file_path}")
+                return False
+                
+            return True
+        except Exception as e:
+            logging.error(f"Path validation error: {e}")
+            return False
+
+
+# API 키 초기화 실행
+Config._initialize_api_keys()
